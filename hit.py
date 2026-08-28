@@ -109,6 +109,10 @@ last_sid_100 = None
 last_sid_101 = None
 sid_for_tx = None
 
+# Biến lưu phiên hiện tại để kiểm tra cập nhật
+current_session_100 = 0
+current_session_101 = 0
+
 # ============== THUẬT TOÁN DỰ ĐOÁN ==============
 
 def du_doan_ket_qua(predict_history):
@@ -223,7 +227,12 @@ def get_tai_xiu(d1, d2, d3):
     return "Xỉu" if total <= 10 else "Tài"
 
 def update_result(store, history, lock, result, predict_history, is_md5, data_file, hist_file, pred_file):
+    global current_session_100, current_session_101
+    
     with lock:
+        # Lấy phiên cũ để so sánh
+        old_phien = store.get("Phien", 0)
+        
         store.clear()
         store.update(result)
         history.insert(0, result.copy())
@@ -250,6 +259,16 @@ def update_result(store, history, lock, result, predict_history, is_md5, data_fi
         save_data(data_file, store)
         save_history(hist_file, history)
         save_history(pred_file, predict_history)
+        
+        # Kiểm tra xem có phiên mới không
+        new_phien = store.get("Phien", 0)
+        if new_phien != old_phien and new_phien > 0:
+            if is_md5:
+                current_session_101 = new_phien
+                logger.info(f"[MD5] 🔄 PHIÊN MỚI: {new_phien} - Web sẽ tự động cập nhật")
+            else:
+                current_session_100 = new_phien
+                logger.info(f"[TX] 🔄 PHIÊN MỚI: {new_phien} - Web sẽ tự động cập nhật")
 
 # ============== POLL API ==============
 
@@ -334,7 +353,6 @@ app = Flask(__name__)
 @app.route("/api/taixiu", methods=["GET"])
 def get_taixiu_100():
     with lock_100:
-        # Đọc dữ liệu mới nhất từ file
         data = load_data(DATA_FILE_100, default_result)
         data["admin"] = "Duy Bảo"
         response = jsonify(data)
@@ -364,7 +382,25 @@ def get_history():
         response.headers['Content-Type'] = 'application/json; charset=utf-8'
         return response
 
-# ============== TRANG CHỦ - GIỮ NGUYÊN NHƯ CŨ ==============
+@app.route("/api/check_update", methods=["GET"])
+def check_update():
+    """API kiểm tra xem có phiên mới không"""
+    gid = request.args.get('gid', '100')
+    current = request.args.get('current', 0, type=int)
+    
+    if gid == '100':
+        latest = current_session_100
+    else:
+        latest = current_session_101
+    
+    return jsonify({
+        "has_update": latest > current,
+        "current_session": current,
+        "latest_session": latest,
+        "admin": "Duy Bảo"
+    })
+
+# ============== TRANG CHỦ - TỰ ĐỘNG CẬP NHẬT ==============
 
 @app.route("/")
 def index():
@@ -403,6 +439,7 @@ def index():
                 margin-bottom: 20px;
                 text-align: center;
                 border: 1px solid #2a3a5e;
+                position: relative;
             }
             .header h1 {
                 font-size: 24px;
@@ -419,12 +456,27 @@ def index():
                 color: #66dd88;
                 margin-top: 6px;
             }
+            .header .auto-update {
+                font-size: 12px;
+                color: #88ccff;
+                margin-top: 4px;
+                animation: blink 2s infinite;
+            }
+            @keyframes blink {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.3; }
+            }
             .card {
                 background: #111827;
                 border-radius: 12px;
                 padding: 16px;
                 margin-bottom: 16px;
                 border: 1px solid #1f2937;
+                transition: all 0.3s ease;
+            }
+            .card.new-update {
+                border-color: #ffd700;
+                box-shadow: 0 0 20px rgba(255, 215, 0, 0.1);
             }
             .card h2 {
                 font-size: 16px;
@@ -441,6 +493,15 @@ def index():
                 border-radius: 20px;
                 color: #9ca3af;
             }
+            .card h2 .update-indicator {
+                font-size: 11px;
+                color: #ffd700;
+                display: none;
+            }
+            .card h2 .update-indicator.show {
+                display: inline;
+                animation: blink 1s infinite;
+            }
             .dice {
                 display: flex;
                 gap: 12px;
@@ -454,10 +515,28 @@ def index():
                 text-align: center;
                 min-width: 60px;
                 border: 1px solid #2a3a5e;
+                transition: all 0.5s ease;
+            }
+            .dice-box.pop {
+                animation: pop 0.5s ease;
+            }
+            @keyframes pop {
+                0% { transform: scale(1); }
+                50% { transform: scale(1.2); background: #2a3a5e; }
+                100% { transform: scale(1); }
             }
             .dice-box .number {
                 font-size: 32px;
                 font-weight: 700;
+                transition: all 0.3s ease;
+            }
+            .dice-box .number.pop-number {
+                animation: popNumber 0.5s ease;
+            }
+            @keyframes popNumber {
+                0% { transform: scale(1); }
+                50% { transform: scale(1.5); color: #ffd700; }
+                100% { transform: scale(1); }
             }
             .dice-box .label {
                 font-size: 11px;
@@ -483,6 +562,15 @@ def index():
             .result-row .value {
                 font-size: 16px;
                 font-weight: 600;
+                transition: all 0.3s ease;
+            }
+            .result-row .value.pulse {
+                animation: pulse 0.5s ease;
+            }
+            @keyframes pulse {
+                0% { transform: scale(1); }
+                50% { transform: scale(1.3); }
+                100% { transform: scale(1); }
             }
             .value.tai {
                 color: #ff6b6b;
@@ -502,6 +590,11 @@ def index():
                 padding: 14px;
                 margin-top: 10px;
                 border: 1px solid #1f3a5e;
+                transition: all 0.5s ease;
+            }
+            .predict-box.new-predict {
+                border-color: #ffd700;
+                background: #1a2a3a;
             }
             .predict-box .title {
                 font-size: 13px;
@@ -511,12 +604,21 @@ def index():
             .predict-box .main {
                 font-size: 22px;
                 font-weight: 700;
+                transition: all 0.3s ease;
             }
             .predict-box .main.tai {
                 color: #ff6b6b;
             }
             .predict-box .main.xiu {
                 color: #4ecdc4;
+            }
+            .predict-box .main.pop-predict {
+                animation: popPredict 0.5s ease;
+            }
+            @keyframes popPredict {
+                0% { transform: scale(1); }
+                50% { transform: scale(1.3); }
+                100% { transform: scale(1); }
             }
             .predict-box .sub {
                 font-size: 13px;
@@ -540,7 +642,7 @@ def index():
                 height: 100%;
                 border-radius: 4px;
                 background: linear-gradient(90deg, #ff6b6b, #ffd700, #4ecdc4);
-                transition: width 0.5s;
+                transition: width 0.5s ease;
             }
             .predict-box .confidence .text {
                 font-size: 13px;
@@ -615,6 +717,26 @@ def index():
                 text-align: center;
                 padding: 20px;
             }
+            .toast {
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: #1a2a3a;
+                border: 1px solid #ffd700;
+                border-radius: 12px;
+                padding: 12px 20px;
+                color: #ffd700;
+                font-size: 14px;
+                z-index: 999;
+                opacity: 0;
+                transform: translateY(-20px);
+                transition: all 0.5s ease;
+                pointer-events: none;
+            }
+            .toast.show {
+                opacity: 1;
+                transform: translateY(0);
+            }
             @media (max-width: 480px) {
                 body { padding: 10px; }
                 .header h1 { font-size: 20px; }
@@ -624,24 +746,32 @@ def index():
                 .result-row .value { font-size: 14px; }
                 .endpoints .item { flex-direction: column; align-items: stretch; }
                 .endpoints .item code { font-size: 11px; }
+                .toast { top: 10px; right: 10px; left: 10px; font-size: 12px; }
             }
         </style>
     </head>
     <body>
+        <div class="toast" id="toast">🔄 Phiên mới đã cập nhật!</div>
+        
         <div class="container" id="app">
             <div class="header">
                 <h1>🎲 HIT Tài Xỉu</h1>
                 <div class="admin">👤 Admin: Duy Bảo</div>
                 <div class="status" id="status">🟢 Đang kết nối...</div>
+                <div class="auto-update">⚡ Tự động cập nhật khi có phiên mới</div>
             </div>
 
             <!-- BÀN THƯỜNG -->
-            <div class="card">
-                <h2>🎯 Bàn Thường <span class="badge" id="phien_100">#---</span></h2>
+            <div class="card" id="card_100">
+                <h2>
+                    🎯 Bàn Thường 
+                    <span class="badge" id="phien_100">#---</span>
+                    <span class="update-indicator" id="indicator_100">🆕 Có phiên mới!</span>
+                </h2>
                 <div class="dice" id="dice_100">
-                    <div class="dice-box"><div class="number" id="d1_100">-</div><div class="label">Xúc xắc 1</div></div>
-                    <div class="dice-box"><div class="number" id="d2_100">-</div><div class="label">Xúc xắc 2</div></div>
-                    <div class="dice-box"><div class="number" id="d3_100">-</div><div class="label">Xúc xắc 3</div></div>
+                    <div class="dice-box" id="box1_100"><div class="number" id="d1_100">-</div><div class="label">Xúc xắc 1</div></div>
+                    <div class="dice-box" id="box2_100"><div class="number" id="d2_100">-</div><div class="label">Xúc xắc 2</div></div>
+                    <div class="dice-box" id="box3_100"><div class="number" id="d3_100">-</div><div class="label">Xúc xắc 3</div></div>
                 </div>
                 <div class="result-row">
                     <span class="label">📊 Tổng điểm</span>
@@ -651,7 +781,7 @@ def index():
                     <span class="label">✅ Kết quả</span>
                     <span class="value" id="ketqua_100">Chưa có</span>
                 </div>
-                <div class="predict-box">
+                <div class="predict-box" id="predict_100">
                     <div class="title">🔮 Dự đoán phiên tiếp theo</div>
                     <div class="main" id="dudoan_100">Chưa đủ dữ liệu</div>
                     <div class="sub" id="lydo_100"></div>
@@ -665,12 +795,16 @@ def index():
             </div>
 
             <!-- BÀN MD5 -->
-            <div class="card">
-                <h2>🔐 Bàn MD5 <span class="badge" id="phien_101">#---</span></h2>
+            <div class="card" id="card_101">
+                <h2>
+                    🔐 Bàn MD5 
+                    <span class="badge" id="phien_101">#---</span>
+                    <span class="update-indicator" id="indicator_101">🆕 Có phiên mới!</span>
+                </h2>
                 <div class="dice" id="dice_101">
-                    <div class="dice-box"><div class="number" id="d1_101">-</div><div class="label">Xúc xắc 1</div></div>
-                    <div class="dice-box"><div class="number" id="d2_101">-</div><div class="label">Xúc xắc 2</div></div>
-                    <div class="dice-box"><div class="number" id="d3_101">-</div><div class="label">Xúc xắc 3</div></div>
+                    <div class="dice-box" id="box1_101"><div class="number" id="d1_101">-</div><div class="label">Xúc xắc 1</div></div>
+                    <div class="dice-box" id="box2_101"><div class="number" id="d2_101">-</div><div class="label">Xúc xắc 2</div></div>
+                    <div class="dice-box" id="box3_101"><div class="number" id="d3_101">-</div><div class="label">Xúc xắc 3</div></div>
                 </div>
                 <div class="result-row">
                     <span class="label">📊 Tổng điểm</span>
@@ -680,7 +814,7 @@ def index():
                     <span class="label">✅ Kết quả</span>
                     <span class="value" id="ketqua_101">Chưa có</span>
                 </div>
-                <div class="predict-box">
+                <div class="predict-box" id="predict_101">
                     <div class="title">🔮 Dự đoán phiên tiếp theo</div>
                     <div class="main" id="dudoan_101">Chưa đủ dữ liệu</div>
                     <div class="sub" id="lydo_101"></div>
@@ -715,57 +849,160 @@ def index():
             </div>
 
             <div class="footer">
-                🚀 HIT API v2.0 | Duy Bảo Admin
+                🚀 HIT API v3.0 | Tự động cập nhật | Duy Bảo Admin
             </div>
         </div>
 
         <script>
+            // ========== BIẾN ==========
+            let currentSession100 = 0;
+            let currentSession101 = 0;
+            let data100 = {};
+            let data101 = {};
+            let isUpdating = false;
+
             // ========== FETCH DATA ==========
             async function fetchData() {
+                if (isUpdating) return;
+                isUpdating = true;
+
                 try {
                     // Fetch bàn thường
                     const res100 = await fetch('/api/taixiu');
-                    const data100 = await res100.json();
-                    updateUI(data100, '100');
-
+                    const newData100 = await res100.json();
+                    
                     // Fetch bàn MD5
                     const res101 = await fetch('/api/taixiumd5');
-                    const data101 = await res101.json();
-                    updateUI(data101, '101');
+                    const newData101 = await res101.json();
 
-                    document.getElementById('status').textContent = '🟢 Đã cập nhật';
+                    // Kiểm tra cập nhật
+                    const oldPhien100 = data100.Phien || 0;
+                    const oldPhien101 = data101.Phien || 0;
+                    
+                    const hasUpdate100 = newData100.Phien > oldPhien100 && newData100.Phien > 0;
+                    const hasUpdate101 = newData101.Phien > oldPhien101 && newData101.Phien > 0;
+
+                    // Cập nhật dữ liệu
+                    data100 = newData100;
+                    data101 = newData101;
+
+                    // Cập nhật UI
+                    updateUI(data100, '100', hasUpdate100);
+                    updateUI(data101, '101', hasUpdate101);
+
+                    // Cập nhật phiên hiện tại
+                    if (hasUpdate100) {
+                        currentSession100 = data100.Phien;
+                        showToast('🔄 Bàn Thường - Phiên ' + data100.Phien);
+                    }
+                    if (hasUpdate101) {
+                        currentSession101 = data101.Phien;
+                        showToast('🔄 Bàn MD5 - Phiên ' + data101.Phien);
+                    }
+
+                    document.getElementById('status').textContent = '🟢 Đã cập nhật - ' + new Date().toLocaleTimeString();
                     document.getElementById('status').style.color = '#66dd88';
+
                 } catch (e) {
                     document.getElementById('status').textContent = '🔴 Lỗi kết nối';
                     document.getElementById('status').style.color = '#ff6b6b';
                     console.error('Fetch error:', e);
                 }
+                
+                isUpdating = false;
             }
 
             // ========== UPDATE UI ==========
-            function updateUI(data, suffix) {
-                // Phiên
-                document.getElementById('phien_' + suffix).textContent = '#' + (data.Phien || '---');
+            function updateUI(data, suffix, hasUpdate) {
+                // Card
+                const card = document.getElementById('card_' + suffix);
+                if (hasUpdate) {
+                    card.classList.add('new-update');
+                    document.getElementById('indicator_' + suffix).classList.add('show');
+                } else {
+                    card.classList.remove('new-update');
+                    document.getElementById('indicator_' + suffix).classList.remove('show');
+                }
                 
-                // Xúc xắc
-                document.getElementById('d1_' + suffix).textContent = data.Xuc_xac_1 || '-';
-                document.getElementById('d2_' + suffix).textContent = data.Xuc_xac_2 || '-';
-                document.getElementById('d3_' + suffix).textContent = data.Xuc_xac_3 || '-';
+                // Phiên
+                const phien = data.Phien || 0;
+                document.getElementById('phien_' + suffix).textContent = '#' + (phien || '---');
+                
+                // Xúc xắc - có hiệu ứng pop
+                const d1 = data.Xuc_xac_1 || '-';
+                const d2 = data.Xuc_xac_2 || '-';
+                const d3 = data.Xuc_xac_3 || '-';
+                
+                const d1El = document.getElementById('d1_' + suffix);
+                const d2El = document.getElementById('d2_' + suffix);
+                const d3El = document.getElementById('d3_' + suffix);
+                
+                if (hasUpdate && d1 !== '-') {
+                    d1El.textContent = d1;
+                    d2El.textContent = d2;
+                    d3El.textContent = d3;
+                    
+                    // Hiệu ứng pop
+                    const box1 = document.getElementById('box1_' + suffix);
+                    const box2 = document.getElementById('box2_' + suffix);
+                    const box3 = document.getElementById('box3_' + suffix);
+                    
+                    box1.classList.remove('pop');
+                    box2.classList.remove('pop');
+                    box3.classList.remove('pop');
+                    d1El.classList.remove('pop-number');
+                    d2El.classList.remove('pop-number');
+                    d3El.classList.remove('pop-number');
+                    
+                    void box1.offsetWidth; // Trigger reflow
+                    box1.classList.add('pop');
+                    box2.classList.add('pop');
+                    box3.classList.add('pop');
+                    d1El.classList.add('pop-number');
+                    d2El.classList.add('pop-number');
+                    d3El.classList.add('pop-number');
+                } else {
+                    d1El.textContent = d1;
+                    d2El.textContent = d2;
+                    d3El.textContent = d3;
+                }
                 
                 // Tổng
-                document.getElementById('tong_' + suffix).textContent = data.Tong || 0;
+                const tong = data.Tong || 0;
+                const tongEl = document.getElementById('tong_' + suffix);
+                tongEl.textContent = tong;
+                if (hasUpdate) {
+                    tongEl.classList.remove('pulse');
+                    void tongEl.offsetWidth;
+                    tongEl.classList.add('pulse');
+                }
                 
                 // Kết quả
                 const ketqua = data.Ket_qua || 'Chưa có';
                 const ketquaEl = document.getElementById('ketqua_' + suffix);
                 ketquaEl.textContent = ketqua;
                 ketquaEl.className = 'value ' + (ketqua === 'Tài' ? 'tai' : ketqua === 'Xỉu' ? 'xiu' : '');
+                if (hasUpdate && ketqua !== 'Chưa có') {
+                    ketquaEl.classList.remove('pulse');
+                    void ketquaEl.offsetWidth;
+                    ketquaEl.classList.add('pulse');
+                }
                 
                 // Dự đoán
                 const dudoan = data.Du_doan || 'Chưa đủ dữ liệu';
                 const dudoanEl = document.getElementById('dudoan_' + suffix);
                 dudoanEl.textContent = dudoan;
                 dudoanEl.className = 'main ' + (dudoan === 'Tài' ? 'tai' : dudoan === 'Xỉu' ? 'xiu' : '');
+                
+                const predictBox = document.getElementById('predict_' + suffix);
+                if (hasUpdate && dudoan !== 'Chưa đủ dữ liệu') {
+                    predictBox.classList.add('new-predict');
+                    dudoanEl.classList.remove('pop-predict');
+                    void dudoanEl.offsetWidth;
+                    dudoanEl.classList.add('pop-predict');
+                } else {
+                    predictBox.classList.remove('new-predict');
+                }
                 
                 // Lý do
                 document.getElementById('lydo_' + suffix).textContent = data.Ly_do || '';
@@ -776,9 +1013,53 @@ def index():
                 document.getElementById('do_tin_cay_text_' + suffix).textContent = doTinCay + '%';
             }
 
-            // ========== AUTO REFRESH ==========
+            // ========== TOAST ==========
+            function showToast(message) {
+                const toast = document.getElementById('toast');
+                toast.textContent = message;
+                toast.classList.add('show');
+                clearTimeout(toast.timeout);
+                toast.timeout = setTimeout(() => {
+                    toast.classList.remove('show');
+                }, 3000);
+            }
+
+            // ========== CHECK UPDATE TỰ ĐỘNG ==========
+            async function checkAutoUpdate() {
+                try {
+                    // Kiểm tra bàn thường
+                    const res100 = await fetch('/api/check_update?gid=100&current=' + currentSession100);
+                    const check100 = await res100.json();
+                    
+                    // Kiểm tra bàn MD5
+                    const res101 = await fetch('/api/check_update?gid=101&current=' + currentSession101);
+                    const check101 = await res101.json();
+                    
+                    if (check100.has_update || check101.has_update) {
+                        fetchData();
+                    }
+                } catch (e) {
+                    // Silent fail
+                }
+            }
+
+            // ========== KHỞI TẠO ==========
             fetchData();
-            setInterval(fetchData, 10000);
+            
+            // Tự động cập nhật dữ liệu mỗi 5 giây
+            setInterval(fetchData, 5000);
+            
+            // Kiểm tra phiên mới mỗi 2 giây (nhanh hơn)
+            setInterval(checkAutoUpdate, 2000);
+            
+            // Kiểm tra kết nối
+            setInterval(() => {
+                const status = document.getElementById('status');
+                if (!status.textContent.includes('Đã cập nhật')) {
+                    status.textContent = '🟡 Đang chờ...';
+                    status.style.color = '#ffd700';
+                }
+            }, 30000);
         </script>
     </body>
     </html>
@@ -787,7 +1068,7 @@ def index():
 # ============== MAIN ==============
 
 if __name__ == "__main__":
-    logger.info("Khởi động hệ thống API Tài Xỉu với lưu trữ dữ liệu...")
+    logger.info("Khởi động hệ thống API Tài Xỉu với tự động cập nhật...")
     logger.info(f"Đã tải {len(history_100)} bản ghi bàn thường")
     logger.info(f"Đã tải {len(history_101)} bản ghi bàn MD5")
     
