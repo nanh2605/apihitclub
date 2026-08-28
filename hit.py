@@ -19,11 +19,11 @@ lock_101 = threading.Lock()
 
 latest_result_100 = {
     "Phien": 0, "Xuc_xac_1": 0, "Xuc_xac_2": 0, "Xuc_xac_3": 0,
-    "Tong": 0, "Ket_qua": "Chưa có", "id": "djtuancon"
+    "Tong": 0, "Ket_qua": "Chưa có", "id": "nanh2605"
 }
 latest_result_101 = {
     "Phien": 0, "Xuc_xac_1": 0, "Xuc_xac_2": 0, "Xuc_xac_3": 0,
-    "Tong": 0, "Ket_qua": "Chưa có", "id": "djtuancon"
+    "Tong": 0, "Ket_qua": "Chưa có", "id": "nanh2605"
 }
 
 history_100 = []
