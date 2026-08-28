@@ -6,6 +6,7 @@ import logging
 from urllib.request import urlopen, Request
 from flask import Flask, jsonify, request
 from datetime import datetime
+import random
 
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
@@ -13,13 +14,63 @@ logger = logging.getLogger(__name__)
 HOST = '0.0.0.0'
 POLL_INTERVAL = 5
 RETRY_DELAY = 5
-MAX_HISTORY = 50
+MAX_HISTORY = 100
 
 lock_100 = threading.Lock()
 lock_101 = threading.Lock()
 
-# ============== DỮ LIỆU BÀN THƯỜNG ==============
-latest_result_100 = {
+# ============== FILE LƯU TRỮ ==============
+DATA_FILE_100 = 'data_taixiu_100.json'
+DATA_FILE_101 = 'data_taixiu_101.json'
+
+def save_data(file_path, data):
+    """Lưu dữ liệu vào file JSON"""
+    try:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        logger.error(f"Lỗi lưu file {file_path}: {e}")
+        return False
+
+def load_data(file_path, default_data):
+    """Đọc dữ liệu từ file JSON"""
+    try:
+        if os.path.exists(file_path):
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    for key in default_data:
+                        if key not in data:
+                            data[key] = default_data[key]
+                return data
+    except Exception as e:
+        logger.error(f"Lỗi đọc file {file_path}: {e}")
+    return default_data.copy()
+
+def load_history(file_path):
+    """Đọc lịch sử từ file"""
+    try:
+        if os.path.exists(file_path):
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception as e:
+        logger.error(f"Lỗi đọc history {file_path}: {e}")
+    return []
+
+def save_history(file_path, history):
+    """Lưu lịch sử vào file"""
+    try:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        logger.error(f"Lỗi lưu history {file_path}: {e}")
+        return False
+
+# ============== DỮ LIỆU KHỞI TẠO ==============
+
+default_result = {
     "Phien": 0,
     "Xuc_xac_1": 0,
     "Xuc_xac_2": 0,
@@ -31,258 +82,139 @@ latest_result_100 = {
     "admin": "Duy Bảo"
 }
 
-# ============== DỮ LIỆU BÀN MD5 ==============
-latest_result_101 = {
-    "Phien": 0,
-    "Xuc_xac_1": 0,
-    "Xuc_xac_2": 0,
-    "Xuc_xac_3": 0,
-    "Tong": 0,
-    "Ket_qua": "Chưa có",
-    "Du_doan": "Chưa đủ dữ liệu",
-    "Do_tin_cay": 0,
-    "admin": "Duy Bảo"
-}
+# Khởi tạo dữ liệu từ file hoặc tạo mới
+latest_result_100 = load_data(DATA_FILE_100, default_result)
+latest_result_101 = load_data(DATA_FILE_101, default_result)
 
-history_100 = []
-history_101 = []
+# Đảm bảo có admin
+latest_result_100["admin"] = "Duy Bảo"
+latest_result_101["admin"] = "Duy Bảo"
+
+# Load lịch sử
+history_100 = load_history('history_100.json')
+history_101 = load_history('history_101.json')
+
+# Đảm bảo MAX_HISTORY
+if len(history_100) > MAX_HISTORY:
+    history_100 = history_100[:MAX_HISTORY]
+if len(history_101) > MAX_HISTORY:
+    history_101 = history_101[:MAX_HISTORY]
+
+# ============== LƯU LỊCH SỬ CHO DỰ ĐOÁN ==============
+predict_history_100 = load_history('predict_history_100.json')
+predict_history_101 = load_history('predict_history_101.json')
+MAX_PREDICT_HISTORY = 100
 
 last_sid_100 = None
 last_sid_101 = None
 sid_for_tx = None
 
-# ============== LƯU LỊCH SỬ CHO DỰ ĐOÁN ==============
-predict_history_100 = []  # Lịch sử bàn thường
-predict_history_101 = []  # Lịch sử bàn MD5
-MAX_PREDICT_HISTORY = 100
+# ============== THUẬT TOÁN DỰ ĐOÁN ==============
 
-# ============== THUẬT TOÁN DỰ ĐOÁN NÂNG CAO ==============
-
-def phan_tich_cau(predict_history, window_size=10):
+def du_doan_ket_qua(predict_history):
     """
-    Phân tích cầu từ lịch sử
+    Dự đoán kết quả tiếp theo
+    predict_history: list các dict có key 'ket_qua'
     """
-    if len(predict_history) < window_size:
-        return None
     
-    recent = predict_history[:window_size]
-    results = [r["ket_qua"] for r in recent if r.get("ket_qua")]
-    
-    if len(results) < 3:
-        return None
-    
-    # Thống kê tần suất
-    tai_count = results.count("Tài")
-    xiu_count = results.count("Xỉu")
-    total = len(results)
-    
-    # Phân tích chuỗi
-    consecutive = 1
-    max_consecutive = 1
-    current = results[0]
-    for i in range(1, len(results)):
-        if results[i] == current:
-            consecutive += 1
-        else:
-            consecutive = 1
-            current = results[i]
-        max_consecutive = max(max_consecutive, consecutive)
-    
-    # Phân tích tổng điểm
-    tong_list = [r.get("tong", 0) for r in recent if r.get("tong", 0) > 0]
-    tong_trung_binh = sum(tong_list) / len(tong_list) if tong_list else 10.5
-    
-    return {
-        "tai_ratio": tai_count / total,
-        "xiu_ratio": xiu_count / total,
-        "max_consecutive": max_consecutive,
-        "current_result": current,
-        "tong_trung_binh": tong_trung_binh,
-        "total_analyzed": total
-    }
-
-def du_doan_thong_minh(predict_history):
-    """
-    Dự đoán thông minh với nhiều chiến lược
-    """
     if len(predict_history) < 3:
         return {
             "Du_doan": "Chưa đủ dữ liệu",
             "Do_tin_cay": 0,
-            "Ly_do": f"Cần ít nhất 3 phiên, hiện có {len(predict_history)} phiên",
-            "Chien_luoc": "Chờ dữ liệu"
+            "Ly_do": f"Cần ít nhất 3 phiên, hiện có {len(predict_history)} phiên"
         }
     
     # Lấy kết quả gần nhất
-    recent_results = [r["ket_qua"] for r in predict_history[:10]]
-    tai_count = recent_results.count("Tài")
-    xiu_count = recent_results.count("Xỉu")
-    total = len(recent_results)
+    recent = [r["ket_qua"] for r in predict_history[:10]]
+    tai_count = recent.count("Tài")
+    xiu_count = recent.count("Xỉu")
+    total = len(recent)
     
-    # ===== CHIẾN LƯỢC 1: BẮT BỆT =====
-    # Kiểm tra 3 phiên gần nhất
-    last_3 = [r["ket_qua"] for r in predict_history[:3]]
-    last_5 = [r["ket_qua"] for r in predict_history[:5]]
+    # ===== LOGIC DỰ ĐOÁN =====
     
-    if len(last_3) == 3:
-        # 3 Tài liên tiếp -> dự đoán Xỉu
-        if last_3 == ["Tài", "Tài", "Tài"]:
-            # Kiểm tra thêm nếu đang trong chuỗi dài
-            if len(last_5) >= 5 and last_5[:4].count("Tài") == 4:
-                return {
-                    "Du_doan": "Xỉu",
-                    "Do_tin_cay": 78,
-                    "Ly_do": "4 phiên Tài liên tiếp, xác suất đảo chiều cao",
-                    "Chien_luoc": "Bắt bệt đảo"
-                }
-            return {
-                "Du_doan": "Xỉu",
-                "Do_tin_cay": 72,
-                "Ly_do": "3 phiên Tài liên tiếp, khả năng đảo chiều sang Xỉu",
-                "Chien_luoc": "Bắt bệt"
-            }
-        
-        # 3 Xỉu liên tiếp -> dự đoán Tài
-        if last_3 == ["Xỉu", "Xỉu", "Xỉu"]:
-            if len(last_5) >= 5 and last_5[:4].count("Xỉu") == 4:
-                return {
-                    "Du_doan": "Tài",
-                    "Do_tin_cay": 78,
-                    "Ly_do": "4 phiên Xỉu liên tiếp, xác suất đảo chiều cao",
-                    "Chien_luoc": "Bắt bệt đảo"
-                }
-            return {
-                "Du_doan": "Tài",
-                "Do_tin_cay": 72,
-                "Ly_do": "3 phiên Xỉu liên tiếp, khả năng đảo chiều sang Tài",
-                "Chien_luoc": "Bắt bệt"
-            }
+    # 1. Kiểm tra chuỗi 3 phiên liên tiếp
+    last_3 = predict_history[:3]
+    last_3_result = [r["ket_qua"] for r in last_3]
     
-    # ===== CHIẾN LƯỢC 2: PATTERN XEN KẼ =====
-    if len(last_3) == 3:
-        # Pattern Tài-Xỉu-Tài
-        if last_3[0] == "Tài" and last_3[1] == "Xỉu" and last_3[2] == "Tài":
+    if last_3_result == ["Tài", "Tài", "Tài"]:
+        return {
+            "Du_doan": "Xỉu",
+            "Do_tin_cay": 72,
+            "Ly_do": "3 phiên Tài liên tiếp, khả năng đảo chiều sang Xỉu"
+        }
+    
+    if last_3_result == ["Xỉu", "Xỉu", "Xỉu"]:
+        return {
+            "Du_doan": "Tài",
+            "Do_tin_cay": 72,
+            "Ly_do": "3 phiên Xỉu liên tiếp, khả năng đảo chiều sang Tài"
+        }
+    
+    # 2. Pattern xen kẽ
+    if len(last_3_result) >= 3:
+        if last_3_result[0] == "Tài" and last_3_result[1] == "Xỉu" and last_3_result[2] == "Tài":
             return {
                 "Du_doan": "Xỉu",
                 "Do_tin_cay": 65,
-                "Ly_do": "Pattern Tài-Xỉu-Tài, dự đoán Xỉu tiếp theo",
-                "Chien_luoc": "Pattern xen kẽ"
+                "Ly_do": "Pattern Tài-Xỉu-Tài, dự đoán Xỉu tiếp theo"
             }
-        # Pattern Xỉu-Tài-Xỉu
-        if last_3[0] == "Xỉu" and last_3[1] == "Tài" and last_3[2] == "Xỉu":
+        if last_3_result[0] == "Xỉu" and last_3_result[1] == "Tài" and last_3_result[2] == "Xỉu":
             return {
                 "Du_doan": "Tài",
                 "Do_tin_cay": 65,
-                "Ly_do": "Pattern Xỉu-Tài-Xỉu, dự đoán Tài tiếp theo",
-                "Chien_luoc": "Pattern xen kẽ"
+                "Ly_do": "Pattern Xỉu-Tài-Xỉu, dự đoán Tài tiếp theo"
             }
     
-    # ===== CHIẾN LƯỢC 3: THEO XU HƯỚNG =====
-    # Phân tích 5 phiên gần nhất
-    if len(last_5) >= 5:
-        tai_in_5 = last_5.count("Tài")
-        xiu_in_5 = last_5.count("Xỉu")
-        
-        # Nếu Tài chiếm ưu thế (4/5)
-        if tai_in_5 >= 4:
-            # Nhưng phiên cuối là Xỉu thì có thể đang đảo
-            if last_5[0] == "Xỉu":
-                return {
-                    "Du_doan": "Xỉu",
-                    "Do_tin_cay": 60,
-                    "Ly_do": "Xu hướng Tài nhưng đang đảo sang Xỉu",
-                    "Chien_luoc": "Theo xu hướng đảo"
-                }
-            return {
-                "Du_doan": "Tài",
-                "Do_tin_cay": 62,
-                "Ly_do": f"Tài chiếm {tai_in_5}/5 phiên gần nhất",
-                "Chien_luoc": "Theo xu hướng Tài"
-            }
-        
-        if xiu_in_5 >= 4:
-            if last_5[0] == "Tài":
-                return {
-                    "Du_doan": "Tài",
-                    "Do_tin_cay": 60,
-                    "Ly_do": "Xu hướng Xỉu nhưng đang đảo sang Tài",
-                    "Chien_luoc": "Theo xu hướng đảo"
-                }
-            return {
-                "Du_doan": "Xỉu",
-                "Do_tin_cay": 62,
-                "Ly_do": f"Xỉu chiếm {xiu_in_5}/5 phiên gần nhất",
-                "Chien_luoc": "Theo xu hướng Xỉu"
-            }
+    # 3. Tỷ lệ
+    tai_ratio = tai_count / total * 100
+    xiu_ratio = xiu_count / total * 100
     
-    # ===== CHIẾN LƯỢC 4: TỔNG ĐIỂM =====
-    tong_list = [r.get("tong", 0) for r in predict_history[:5] if r.get("tong", 0) > 0]
+    if tai_ratio >= 65:
+        return {
+            "Du_doan": "Tài",
+            "Do_tin_cay": round(tai_ratio, 1),
+            "Ly_do": f"Tài chiếm {round(tai_ratio, 1)}% trong {total} phiên gần nhất"
+        }
+    
+    if xiu_ratio >= 65:
+        return {
+            "Du_doan": "Xỉu",
+            "Do_tin_cay": round(xiu_ratio, 1),
+            "Ly_do": f"Xỉu chiếm {round(xiu_ratio, 1)}% trong {total} phiên gần nhất"
+        }
+    
+    # 4. Tổng điểm trung bình
+    tong_list = [r.get("tong", 0) for r in predict_history[:5] if r.get("tong")]
     if tong_list:
         tong_trung_binh = sum(tong_list) / len(tong_list)
         
-        # Tổng trung bình > 12 -> nghiêng Tài
-        if tong_trung_binh > 12:
+        if tong_trung_binh > 11:
             return {
                 "Du_doan": "Tài",
                 "Do_tin_cay": 55,
-                "Ly_do": f"Tổng TB {round(tong_trung_binh, 1)} > 12, nghiêng về Tài",
-                "Chien_luoc": "Phân tích tổng"
+                "Ly_do": f"Tổng TB {round(tong_trung_binh, 1)} > 11, nghiêng về Tài"
             }
         
-        # Tổng trung bình < 9 -> nghiêng Xỉu
-        if tong_trung_binh < 9:
+        if tong_trung_binh < 10:
             return {
                 "Du_doan": "Xỉu",
                 "Do_tin_cay": 55,
-                "Ly_do": f"Tổng TB {round(tong_trung_binh, 1)} < 9, nghiêng về Xỉu",
-                "Chien_luoc": "Phân tích tổng"
+                "Ly_do": f"Tổng TB {round(tong_trung_binh, 1)} < 10, nghiêng về Xỉu"
             }
     
-    # ===== CHIẾN LƯỢC 5: TỶ LỆ TỔNG THỂ =====
-    if total >= 5:
-        tai_ratio = tai_count / total * 100
-        xiu_ratio = xiu_count / total * 100
-        
-        # Nếu 1 bên chiếm > 60%
-        if tai_ratio >= 60:
-            return {
-                "Du_doan": "Tài",
-                "Do_tin_cay": round(tai_ratio, 1),
-                "Ly_do": f"Tài chiếm {round(tai_ratio, 1)}% trong {total} phiên gần nhất",
-                "Chien_luoc": "Tỷ lệ tổng thể"
-            }
-        
-        if xiu_ratio >= 60:
-            return {
-                "Du_doan": "Xỉu",
-                "Do_tin_cay": round(xiu_ratio, 1),
-                "Ly_do": f"Xỉu chiếm {round(xiu_ratio, 1)}% trong {total} phiên gần nhất",
-                "Chien_luoc": "Tỷ lệ tổng thể"
-            }
-    
-    # ===== CHIẾN LƯỢC 6: MẶC ĐỊNH =====
-    # Dự đoán theo xu hướng gần nhất
-    if total > 0:
-        last_result = predict_history[0].get("ket_qua")
-        if last_result in ["Tài", "Xỉu"]:
-            # Nếu 2 phiên gần nhất khác nhau -> dự đoán theo phiên cuối
-            if len(predict_history) >= 2:
-                prev_result = predict_history[1].get("ket_qua")
-                if prev_result != last_result:
-                    return {
-                        "Du_doan": last_result,
-                        "Do_tin_cay": 55,
-                        "Ly_do": f"Xu hướng đang là {last_result} (phiên gần nhất)",
-                        "Chien_luoc": "Theo xu hướng cuối"
-                    }
-    
-    # Nếu tất cả đều cân bằng
-    return {
-        "Du_doan": random.choice(["Tài", "Xỉu"]),
-        "Do_tin_cay": 50,
-        "Ly_do": "Dữ liệu cân bằng, dự đoán ngẫu nhiên",
-        "Chien_luoc": "Ngẫu nhiên"
-    }
+    # 5. Mặc định
+    if tai_count > xiu_count:
+        return {
+            "Du_doan": "Tài",
+            "Do_tin_cay": 52,
+            "Ly_do": f"Tài có xu hướng nhỉnh hơn ({tai_count}/{total} phiên)"
+        }
+    else:
+        return {
+            "Du_doan": "Xỉu",
+            "Do_tin_cay": 52,
+            "Ly_do": f"Xỉu có xu hướng nhỉnh hơn ({xiu_count}/{total} phiên)"
+        }
 
 # ============== HÀM CHÍNH ==============
 
@@ -290,7 +222,7 @@ def get_tai_xiu(d1, d2, d3):
     total = d1 + d2 + d3
     return "Xỉu" if total <= 10 else "Tài"
 
-def update_result(store, history, lock, result, predict_history, is_md5):
+def update_result(store, history, lock, result, predict_history, is_md5, data_file, hist_file, pred_file):
     with lock:
         store.clear()
         store.update(result)
@@ -310,11 +242,14 @@ def update_result(store, history, lock, result, predict_history, is_md5):
                 predict_history.pop()
         
         # Cập nhật dự đoán vào store
-        du_doan_result = du_doan_thong_minh(predict_history)
+        du_doan_result = du_doan_ket_qua(predict_history)
         store["Du_doan"] = du_doan_result.get("Du_doan", "Chưa đủ dữ liệu")
         store["Do_tin_cay"] = du_doan_result.get("Do_tin_cay", 0)
-        store["Ly_do"] = du_doan_result.get("Ly_do", "")
-        store["Chien_luoc"] = du_doan_result.get("Chien_luoc", "")
+        
+        # Lưu vào file
+        save_data(data_file, store)
+        save_history(hist_file, history)
+        save_history(pred_file, predict_history)
 
 # ============== POLL API ==============
 
@@ -322,8 +257,17 @@ def poll_api(gid, lock, result_store, history, is_md5):
     global last_sid_100, last_sid_101, sid_for_tx
     url = f"https://jakpotgwab.geightdors.net/glms/v1/notify/taixiu?platform_id=g8&gid={gid}"
     
-    # Chọn lịch sử dự đoán tương ứng
-    predict_history = predict_history_101 if is_md5 else predict_history_100
+    # Chọn file và history tương ứng
+    if is_md5:
+        predict_history = predict_history_101
+        data_file = DATA_FILE_101
+        hist_file = 'history_101.json'
+        pred_file = 'predict_history_101.json'
+    else:
+        predict_history = predict_history_100
+        data_file = DATA_FILE_100
+        hist_file = 'history_100.json'
+        pred_file = 'predict_history_100.json'
     
     while True:
         try:
@@ -353,7 +297,8 @@ def poll_api(gid, lock, result_store, history, is_md5):
                                 "Ket_qua": ket_qua,
                                 "admin": "Duy Bảo"
                             }
-                            update_result(result_store, history, lock, result, predict_history_101, True)
+                            update_result(result_store, history, lock, result, predict_history_101, True, 
+                                        data_file, hist_file, pred_file)
                             logger.info(f"[MD5] Phiên {sid} - Tổng: {total}, Kết quả: {ket_qua}")
                     elif not is_md5 and cmd == 1003:
                         d1, d2, d3 = game.get("d1"), game.get("d2"), game.get("d3")
@@ -371,7 +316,8 @@ def poll_api(gid, lock, result_store, history, is_md5):
                                 "Ket_qua": ket_qua,
                                 "admin": "Duy Bảo"
                             }
-                            update_result(result_store, history, lock, result, predict_history_100, False)
+                            update_result(result_store, history, lock, result, predict_history_100, False,
+                                        data_file, hist_file, pred_file)
                             logger.info(f"[TX] Phiên {sid} - Tổng: {total}, Kết quả: {ket_qua}")
                             sid_for_tx = None
         except Exception as e:
@@ -388,14 +334,19 @@ app = Flask(__name__)
 @app.route("/api/taixiu", methods=["GET"])
 def get_taixiu_100():
     with lock_100:
-        response = jsonify(latest_result_100)
+        # Đọc dữ liệu mới nhất từ file
+        data = load_data(DATA_FILE_100, default_result)
+        data["admin"] = "Duy Bảo"
+        response = jsonify(data)
         response.headers['Content-Type'] = 'application/json; charset=utf-8'
         return response
 
 @app.route("/api/taixiumd5", methods=["GET"])
 def get_taixiu_101():
     with lock_101:
-        response = jsonify(latest_result_101)
+        data = load_data(DATA_FILE_101, default_result)
+        data["admin"] = "Duy Bảo"
+        response = jsonify(data)
         response.headers['Content-Type'] = 'application/json; charset=utf-8'
         return response
 
@@ -403,15 +354,17 @@ def get_taixiu_101():
 def get_history():
     limit = request.args.get('limit', 50, type=int)
     with lock_100, lock_101:
+        hist_100 = load_history('history_100.json')
+        hist_101 = load_history('history_101.json')
         response = jsonify({
-            "taixiu": history_100[:limit],
-            "taixiumd5": history_101[:limit],
+            "taixiu": hist_100[:limit],
+            "taixiumd5": hist_101[:limit],
             "admin": "Duy Bảo"
         })
         response.headers['Content-Type'] = 'application/json; charset=utf-8'
         return response
 
-# ============== TRANG CHỦ ==============
+# ============== TRANG CHỦ - GIỮ NGUYÊN NHƯ CŨ ==============
 
 @app.route("/")
 def index():
@@ -570,15 +523,6 @@ def index():
                 color: #9ca3af;
                 margin-top: 4px;
             }
-            .predict-box .strategy {
-                font-size: 12px;
-                color: #88ccff;
-                margin-top: 4px;
-                background: #1a2236;
-                padding: 4px 10px;
-                border-radius: 6px;
-                display: inline-block;
-            }
             .predict-box .confidence {
                 margin-top: 8px;
                 display: flex;
@@ -671,14 +615,6 @@ def index():
                 text-align: center;
                 padding: 20px;
             }
-            .strategy-badge {
-                font-size: 11px;
-                background: #1a2a3a;
-                padding: 2px 12px;
-                border-radius: 12px;
-                color: #88ccff;
-                border: 1px solid #2a3a5e;
-            }
             @media (max-width: 480px) {
                 body { padding: 10px; }
                 .header h1 { font-size: 20px; }
@@ -719,9 +655,6 @@ def index():
                     <div class="title">🔮 Dự đoán phiên tiếp theo</div>
                     <div class="main" id="dudoan_100">Chưa đủ dữ liệu</div>
                     <div class="sub" id="lydo_100"></div>
-                    <div style="margin-top: 4px;">
-                        <span class="strategy-badge" id="chienluoc_100">Chờ dữ liệu</span>
-                    </div>
                     <div class="confidence">
                         <span style="font-size:13px;color:#9ca3af;">Độ tin cậy</span>
                         <div class="bar"><div class="fill" id="do_tin_cay_100" style="width:0%"></div></div>
@@ -751,9 +684,6 @@ def index():
                     <div class="title">🔮 Dự đoán phiên tiếp theo</div>
                     <div class="main" id="dudoan_101">Chưa đủ dữ liệu</div>
                     <div class="sub" id="lydo_101"></div>
-                    <div style="margin-top: 4px;">
-                        <span class="strategy-badge" id="chienluoc_101">Chờ dữ liệu</span>
-                    </div>
                     <div class="confidence">
                         <span style="font-size:13px;color:#9ca3af;">Độ tin cậy</span>
                         <div class="bar"><div class="fill" id="do_tin_cay_101" style="width:0%"></div></div>
@@ -840,9 +770,6 @@ def index():
                 // Lý do
                 document.getElementById('lydo_' + suffix).textContent = data.Ly_do || '';
                 
-                // Chiến lược
-                document.getElementById('chienluoc_' + suffix).textContent = data.Chien_luoc || 'Đang phân tích';
-                
                 // Độ tin cậy
                 const doTinCay = data.Do_tin_cay || 0;
                 document.getElementById('do_tin_cay_' + suffix).style.width = doTinCay + '%';
@@ -860,9 +787,10 @@ def index():
 # ============== MAIN ==============
 
 if __name__ == "__main__":
-    # Thêm import random cho dự đoán ngẫu nhiên
-    import random
-    logger.info("Khởi động hệ thống API Tài Xỉu với AI dự đoán thông minh...")
+    logger.info("Khởi động hệ thống API Tài Xỉu với lưu trữ dữ liệu...")
+    logger.info(f"Đã tải {len(history_100)} bản ghi bàn thường")
+    logger.info(f"Đã tải {len(history_101)} bản ghi bàn MD5")
+    
     thread_100 = threading.Thread(target=poll_api, args=("vgmn_100", lock_100, latest_result_100, history_100, False), daemon=True)
     thread_101 = threading.Thread(target=poll_api, args=("vgmn_101", lock_101, latest_result_101, history_101, True), daemon=True)
     thread_100.start()
