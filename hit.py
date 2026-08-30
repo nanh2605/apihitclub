@@ -72,42 +72,13 @@ def save_history(file_path, history):
         logger.error(f"Lỗi lưu history {file_path}: {e}")
         return False
 
-# ============== DỮ LIỆU KHỞI TẠO ==============
+# ============== LẤY LỊCH SỬ TỪ API ==============
 
-default_result = {
-    "Phien": 0,
-    "Xuc_xac_1": 0,
-    "Xuc_xac_2": 0,
-    "Xuc_xac_3": 0,
-    "Tong": 0,
-    "Ket_qua": "Chưa có",
-    "Du_doan": "Chưa đủ dữ liệu",
-    "Do_tin_cay": 0,
-    "admin": "Duy Bảo"
-}
-
-# Khởi tạo dữ liệu từ file hoặc tạo mới
-latest_result_100 = load_data(DATA_FILE_100, default_result)
-latest_result_101 = load_data(DATA_FILE_101, default_result)
-
-# Đảm bảo có admin
-latest_result_100["admin"] = "Duy Bảo"
-latest_result_101["admin"] = "Duy Bảo"
-
-# Load lịch sử
-history_100 = load_history(HISTORY_FILE_100)
-history_101 = load_history(HISTORY_FILE_101)
-
-# Load lịch sử dự đoán
-predict_history_100 = load_history(PREDICT_FILE_100)
-predict_history_101 = load_history(PREDICT_FILE_101)
-
-MAX_PREDICT_HISTORY = 100
-
-# ============== LẤY FULL LỊCH SỬ TỪ API ==============
-
-def fetch_full_history(gid, is_md5):
-    """Lấy toàn bộ lịch sử từ API"""
+def fetch_history_from_api(gid, is_md5):
+    """Lấy lịch sử từ API và trả về dữ liệu"""
+    history_data = []
+    predict_data = []
+    
     try:
         url = f"https://jakpotgwab.geightdors.net/glms/v1/notify/taixiu?platform_id=g8&gid={gid}"
         req = Request(url, headers={'User-Agent': 'Python-Proxy/1.0'})
@@ -115,9 +86,6 @@ def fetch_full_history(gid, is_md5):
             data = json.loads(resp.read().decode('utf-8'))
         
         if data.get('status') == 'OK' and isinstance(data.get('data'), list):
-            history_data = []
-            predict_data = []
-            
             for game in data['data']:
                 cmd = game.get("cmd")
                 
@@ -169,27 +137,28 @@ def fetch_full_history(gid, is_md5):
                             "tong": total,
                             "xuc_xac": [d1, d2, d3]
                         })
-            
-            # Sắp xếp theo phiên giảm dần (mới nhất đầu)
-            history_data.sort(key=lambda x: x.get("Phien", 0), reverse=True)
-            predict_data.sort(key=lambda x: x.get("phien", 0), reverse=True)
-            
-            return history_data, predict_data
-    
+        
+        # Sắp xếp theo phiên giảm dần (mới nhất đầu)
+        history_data.sort(key=lambda x: x.get("Phien", 0), reverse=True)
+        predict_data.sort(key=lambda x: x.get("phien", 0), reverse=True)
+        
+        return history_data, predict_data
+        
     except Exception as e:
-        logger.error(f"Lỗi lấy full history {gid}: {e}")
+        logger.error(f"Lỗi lấy lịch sử từ API {gid}: {e}")
     
     return [], []
 
 def load_full_history():
-    """Load toàn bộ lịch sử cho cả 2 bàn"""
+    """Load toàn bộ lịch sử và cập nhật dự đoán"""
     global history_100, history_101, predict_history_100, predict_history_101
     global latest_result_100, latest_result_101
     
-    logger.info("🔄 Đang lấy toàn bộ lịch sử từ API...")
+    logger.info("=" * 50)
+    logger.info("🔄 ĐANG LẤY LỊCH SỬ TỪ API...")
     
     # Lấy lịch sử bàn thường
-    hist_100, pred_100 = fetch_full_history("vgmn_100", False)
+    hist_100, pred_100 = fetch_history_from_api("vgmn_100", False)
     if hist_100:
         history_100 = hist_100
         predict_history_100 = pred_100
@@ -201,13 +170,12 @@ def load_full_history():
             latest_result_100.update(history_100[0])
             save_data(DATA_FILE_100, latest_result_100)
         
-        logger.info(f"✅ Đã lấy {len(history_100)} bản ghi bàn thường")
-        logger.info(f"✅ Đã lấy {len(predict_history_100)} bản ghi dự đoán bàn thường")
+        logger.info(f"✅ Bàn thường: Đã lấy {len(history_100)} phiên")
     else:
-        logger.warning("⚠️ Không lấy được lịch sử bàn thường, sử dụng dữ liệu cũ")
+        logger.warning("⚠️ Không lấy được lịch sử bàn thường, dùng dữ liệu cũ")
     
     # Lấy lịch sử bàn MD5
-    hist_101, pred_101 = fetch_full_history("vgmn_101", True)
+    hist_101, pred_101 = fetch_history_from_api("vgmn_101", True)
     if hist_101:
         history_101 = hist_101
         predict_history_101 = pred_101
@@ -219,33 +187,87 @@ def load_full_history():
             latest_result_101.update(history_101[0])
             save_data(DATA_FILE_101, latest_result_101)
         
-        logger.info(f"✅ Đã lấy {len(history_101)} bản ghi bàn MD5")
-        logger.info(f"✅ Đã lấy {len(predict_history_101)} bản ghi dự đoán bàn MD5")
+        logger.info(f"✅ Bàn MD5: Đã lấy {len(history_101)} phiên")
     else:
-        logger.warning("⚠️ Không lấy được lịch sử bàn MD5, sử dụng dữ liệu cũ")
+        logger.warning("⚠️ Không lấy được lịch sử bàn MD5, dùng dữ liệu cũ")
     
-    # Cập nhật dự đoán từ lịch sử đã có
-    update_prediction_for_both()
+    # Cập nhật dự đoán từ lịch sử
+    update_predictions()
     
-    logger.info("✅ Hoàn tất tải lịch sử!")
+    logger.info("✅ HOÀN TẤT LẤY LỊCH SỬ!")
+    logger.info("=" * 50)
 
-def update_prediction_for_both():
+def update_predictions():
     """Cập nhật dự đoán cho cả 2 bàn từ lịch sử đã có"""
+    
+    # Cập nhật bàn thường
     with lock_100:
         if predict_history_100:
             du_doan = du_doan_ket_qua(predict_history_100)
             latest_result_100["Du_doan"] = du_doan.get("Du_doan", "Chưa đủ dữ liệu")
             latest_result_100["Do_tin_cay"] = du_doan.get("Do_tin_cay", 0)
+            latest_result_100["Ly_do"] = du_doan.get("Ly_do", "")
             save_data(DATA_FILE_100, latest_result_100)
-            logger.info(f"📊 Đã cập nhật dự đoán bàn thường: {latest_result_100['Du_doan']} (độ tin cậy {latest_result_100['Do_tin_cay']}%)")
+            logger.info(f"📊 Dự đoán bàn thường: {latest_result_100['Du_doan']} (độ tin cậy {latest_result_100['Do_tin_cay']}%)")
+        else:
+            latest_result_100["Du_doan"] = "Chưa có dữ liệu lịch sử"
+            latest_result_100["Do_tin_cay"] = 0
+            latest_result_100["Ly_do"] = "Chưa có dữ liệu lịch sử"
+            save_data(DATA_FILE_100, latest_result_100)
     
+    # Cập nhật bàn MD5
     with lock_101:
         if predict_history_101:
             du_doan = du_doan_ket_qua(predict_history_101)
             latest_result_101["Du_doan"] = du_doan.get("Du_doan", "Chưa đủ dữ liệu")
             latest_result_101["Do_tin_cay"] = du_doan.get("Do_tin_cay", 0)
+            latest_result_101["Ly_do"] = du_doan.get("Ly_do", "")
             save_data(DATA_FILE_101, latest_result_101)
-            logger.info(f"📊 Đã cập nhật dự đoán bàn MD5: {latest_result_101['Du_doan']} (độ tin cậy {latest_result_101['Do_tin_cay']}%)")
+            logger.info(f"📊 Dự đoán bàn MD5: {latest_result_101['Du_doan']} (độ tin cậy {latest_result_101['Do_tin_cay']}%)")
+        else:
+            latest_result_101["Du_doan"] = "Chưa có dữ liệu lịch sử"
+            latest_result_101["Do_tin_cay"] = 0
+            latest_result_101["Ly_do"] = "Chưa có dữ liệu lịch sử"
+            save_data(DATA_FILE_101, latest_result_101)
+
+# ============== DỮ LIỆU KHỞI TẠO ==============
+
+default_result = {
+    "Phien": 0,
+    "Xuc_xac_1": 0,
+    "Xuc_xac_2": 0,
+    "Xuc_xac_3": 0,
+    "Tong": 0,
+    "Ket_qua": "Chưa có",
+    "Du_doan": "Chưa đủ dữ liệu",
+    "Do_tin_cay": 0,
+    "Ly_do": "",
+    "admin": "Duy Bảo"
+}
+
+# Khởi tạo dữ liệu từ file hoặc tạo mới
+latest_result_100 = load_data(DATA_FILE_100, default_result)
+latest_result_101 = load_data(DATA_FILE_101, default_result)
+
+# Đảm bảo có admin
+latest_result_100["admin"] = "Duy Bảo"
+latest_result_101["admin"] = "Duy Bảo"
+
+# Load lịch sử từ file
+history_100 = load_history(HISTORY_FILE_100)
+history_101 = load_history(HISTORY_FILE_101)
+predict_history_100 = load_history(PREDICT_FILE_100)
+predict_history_101 = load_history(PREDICT_FILE_101)
+
+MAX_PREDICT_HISTORY = 100
+
+last_sid_100 = None
+last_sid_101 = None
+sid_for_tx = None
+
+# Biến lưu phiên hiện tại để kiểm tra cập nhật
+current_session_100 = latest_result_100.get("Phien", 0)
+current_session_101 = latest_result_101.get("Phien", 0)
 
 # ============== THUẬT TOÁN DỰ ĐOÁN ==============
 
@@ -361,7 +383,12 @@ def get_tai_xiu(d1, d2, d3):
     return "Xỉu" if total <= 10 else "Tài"
 
 def update_result(store, history, lock, result, predict_history, is_md5, data_file, hist_file, pred_file):
+    global current_session_100, current_session_101
+    
     with lock:
+        # Lấy phiên cũ để so sánh
+        old_phien = store.get("Phien", 0)
+        
         store.clear()
         store.update(result)
         history.insert(0, result.copy())
@@ -383,11 +410,22 @@ def update_result(store, history, lock, result, predict_history, is_md5, data_fi
         du_doan_result = du_doan_ket_qua(predict_history)
         store["Du_doan"] = du_doan_result.get("Du_doan", "Chưa đủ dữ liệu")
         store["Do_tin_cay"] = du_doan_result.get("Do_tin_cay", 0)
+        store["Ly_do"] = du_doan_result.get("Ly_do", "")
         
         # Lưu vào file
         save_data(data_file, store)
         save_history(hist_file, history)
         save_history(pred_file, predict_history)
+        
+        # Kiểm tra xem có phiên mới không
+        new_phien = store.get("Phien", 0)
+        if new_phien != old_phien and new_phien > 0:
+            if is_md5:
+                current_session_101 = new_phien
+                logger.info(f"[MD5] 🔄 PHIÊN MỚI: {new_phien}")
+            else:
+                current_session_100 = new_phien
+                logger.info(f"[TX] 🔄 PHIÊN MỚI: {new_phien}")
 
 # ============== POLL API ==============
 
@@ -401,13 +439,11 @@ def poll_api(gid, lock, result_store, history, is_md5):
         data_file = DATA_FILE_101
         hist_file = HISTORY_FILE_101
         pred_file = PREDICT_FILE_101
-        last_sid = None
     else:
         predict_history = predict_history_100
         data_file = DATA_FILE_100
         hist_file = HISTORY_FILE_100
         pred_file = PREDICT_FILE_100
-        last_sid = None
     
     while True:
         try:
@@ -476,6 +512,8 @@ def get_taixiu_100():
     with lock_100:
         data = load_data(DATA_FILE_100, default_result)
         data["admin"] = "Duy Bảo"
+        # Thêm thông tin số phiên đã phân tích
+        data["So_phien_da_phan_tich"] = len(predict_history_100)
         response = jsonify(data)
         response.headers['Content-Type'] = 'application/json; charset=utf-8'
         return response
@@ -485,6 +523,7 @@ def get_taixiu_101():
     with lock_101:
         data = load_data(DATA_FILE_101, default_result)
         data["admin"] = "Duy Bảo"
+        data["So_phien_da_phan_tich"] = len(predict_history_101)
         response = jsonify(data)
         response.headers['Content-Type'] = 'application/json; charset=utf-8'
         return response
@@ -505,23 +544,6 @@ def get_history():
         response.headers['Content-Type'] = 'application/json; charset=utf-8'
         return response
 
-@app.route("/api/predict_history", methods=["GET"])
-def get_predict_history():
-    """API xem lịch sử dự đoán"""
-    gid = request.args.get('gid', '100')
-    limit = request.args.get('limit', 20, type=int)
-    
-    if gid == '100':
-        pred_hist = load_history(PREDICT_FILE_100)
-    else:
-        pred_hist = load_history(PREDICT_FILE_101)
-    
-    return jsonify({
-        "predict_history": pred_hist[:limit],
-        "total": len(pred_hist),
-        "admin": "Duy Bảo"
-    })
-
 @app.route("/api/reload_history", methods=["GET"])
 def reload_history():
     """API tải lại lịch sử từ nguồn"""
@@ -531,6 +553,24 @@ def reload_history():
         "message": "Đã tải lại lịch sử",
         "taixiu_count": len(history_100),
         "taixiumd5_count": len(history_101),
+        "admin": "Duy Bảo"
+    })
+
+@app.route("/api/check_update", methods=["GET"])
+def check_update():
+    """API kiểm tra xem có phiên mới không"""
+    gid = request.args.get('gid', '100')
+    current = request.args.get('current', 0, type=int)
+    
+    if gid == '100':
+        latest = current_session_100
+    else:
+        latest = current_session_101
+    
+    return jsonify({
+        "has_update": latest > current,
+        "current_session": current,
+        "latest_session": latest,
         "admin": "Duy Bảo"
     })
 
@@ -806,7 +846,7 @@ def index():
                 <h1>🎲 HIT Tài Xỉu</h1>
                 <div class="admin">👤 Admin: Duy Bảo</div>
                 <div class="status" id="status">🟢 Đang kết nối...</div>
-                <div class="info" id="info">📊 Đang tải lịch sử...</div>
+                <div class="info" id="info">📊 Đang tải dữ liệu...</div>
             </div>
 
             <!-- BÀN THƯỜNG -->
@@ -975,7 +1015,7 @@ if __name__ == "__main__":
     logger.info("🚀 Khởi động hệ thống API Tài Xỉu...")
     logger.info("=" * 50)
     
-    # Load full lịch sử trước khi chạy
+    # Load full lịch sử ngay khi khởi động
     load_full_history()
     
     logger.info("=" * 50)
