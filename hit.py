@@ -683,6 +683,8 @@ def poll_api(gid, lock, result_store, history, is_md5):
 
 app = Flask(__name__)
 
+# ============== API ==============
+
 @app.route("/api/taixiu", methods=["GET"])
 def get_taixiu_100():
     with lock_100:
@@ -745,6 +747,27 @@ def check_update():
         "admin": "Duy Bảo"
     })
 
+@app.route("/", methods=["GET"])
+def index():
+    return jsonify({
+        "status": "running",
+        "message": "🎲 HIT API - Tài Xỉu VIP Prediction",
+        "admin": "Duy Bảo",
+        "endpoints": {
+            "/api/taixiu": "Kết quả bàn thường + dự đoán VIP",
+            "/api/taixiumd5": "Kết quả bàn MD5 + dự đoán VIP",
+            "/api/history": "Lịch sử kết quả",
+            "/api/reload_history": "Tải lại lịch sử từ API",
+            "/api/check_update": "Kiểm tra phiên mới"
+        },
+        "features": {
+            "cau_1": "Chuỗi và Pattern - Bắt bệt đảo, xen kẽ",
+            "cau_2": "Tần suất và Tỷ lệ - Thống kê 30 phiên",
+            "cau_3": "Markov Chain - Xác suất chuyển tiếp",
+            "cau_4": "Fibonacci Wave - Phân tích sóng"
+        }
+    })
+
 # ============== MAIN ==============
 
 if __name__ == "__main__":
@@ -763,5 +786,18 @@ if __name__ == "__main__":
     thread_101.start()
     
     logger.info("✅ ĐÃ BẮT ĐẦU POLLING.")
+    
     port = int(os.environ.get("PORT", 8000))
-    app.run(host=HOST, port=port)
+    
+    # Chạy với production server nếu có gunicorn, ngược lại dùng flask
+    try:
+        # Kiểm tra nếu chạy với gunicorn
+        if 'gunicorn' in os.environ.get('SERVER_SOFTWARE', ''):
+            # Gunicorn sẽ chạy app
+            pass
+        else:
+            # Chạy với flask development (có thể dùng cho testing)
+            app.run(host=HOST, port=port, debug=False)
+    except:
+        # Fallback
+        app.run(host=HOST, port=port, debug=False)
