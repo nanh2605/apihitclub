@@ -22,6 +22,10 @@ lock_101 = threading.Lock()
 # ============== FILE LƯU TRỮ ==============
 DATA_FILE_100 = 'data_taixiu_100.json'
 DATA_FILE_101 = 'data_taixiu_101.json'
+HISTORY_FILE_100 = 'history_100.json'
+HISTORY_FILE_101 = 'history_101.json'
+PREDICT_FILE_100 = 'predict_history_100.json'
+PREDICT_FILE_101 = 'predict_history_101.json'
 
 def save_data(file_path, data):
     """Lưu dữ liệu vào file JSON"""
@@ -91,27 +95,157 @@ latest_result_100["admin"] = "Duy Bảo"
 latest_result_101["admin"] = "Duy Bảo"
 
 # Load lịch sử
-history_100 = load_history('history_100.json')
-history_101 = load_history('history_101.json')
+history_100 = load_history(HISTORY_FILE_100)
+history_101 = load_history(HISTORY_FILE_101)
 
-# Đảm bảo MAX_HISTORY
-if len(history_100) > MAX_HISTORY:
-    history_100 = history_100[:MAX_HISTORY]
-if len(history_101) > MAX_HISTORY:
-    history_101 = history_101[:MAX_HISTORY]
+# Load lịch sử dự đoán
+predict_history_100 = load_history(PREDICT_FILE_100)
+predict_history_101 = load_history(PREDICT_FILE_101)
 
-# ============== LƯU LỊCH SỬ CHO DỰ ĐOÁN ==============
-predict_history_100 = load_history('predict_history_100.json')
-predict_history_101 = load_history('predict_history_101.json')
 MAX_PREDICT_HISTORY = 100
 
-last_sid_100 = None
-last_sid_101 = None
-sid_for_tx = None
+# ============== LẤY FULL LỊCH SỬ TỪ API ==============
 
-# Biến lưu phiên hiện tại để kiểm tra cập nhật
-current_session_100 = 0
-current_session_101 = 0
+def fetch_full_history(gid, is_md5):
+    """Lấy toàn bộ lịch sử từ API"""
+    try:
+        url = f"https://jakpotgwab.geightdors.net/glms/v1/notify/taixiu?platform_id=g8&gid={gid}"
+        req = Request(url, headers={'User-Agent': 'Python-Proxy/1.0'})
+        with urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+        
+        if data.get('status') == 'OK' and isinstance(data.get('data'), list):
+            history_data = []
+            predict_data = []
+            
+            for game in data['data']:
+                cmd = game.get("cmd")
+                
+                # Lấy kết quả
+                if is_md5 and cmd == 2006:
+                    sid = game.get("sid")
+                    d1, d2, d3 = game.get("d1"), game.get("d2"), game.get("d3")
+                    if sid and None not in (d1, d2, d3):
+                        total = d1 + d2 + d3
+                        ket_qua = "Xỉu" if total <= 10 else "Tài"
+                        
+                        history_data.append({
+                            "Phien": sid,
+                            "Xuc_xac_1": d1,
+                            "Xuc_xac_2": d2,
+                            "Xuc_xac_3": d3,
+                            "Tong": total,
+                            "Ket_qua": ket_qua,
+                            "admin": "Duy Bảo"
+                        })
+                        
+                        predict_data.append({
+                            "phien": sid,
+                            "ket_qua": ket_qua,
+                            "tong": total,
+                            "xuc_xac": [d1, d2, d3]
+                        })
+                
+                elif not is_md5 and cmd == 1003:
+                    sid = game.get("sid")
+                    d1, d2, d3 = game.get("d1"), game.get("d2"), game.get("d3")
+                    if sid and None not in (d1, d2, d3):
+                        total = d1 + d2 + d3
+                        ket_qua = "Xỉu" if total <= 10 else "Tài"
+                        
+                        history_data.append({
+                            "Phien": sid,
+                            "Xuc_xac_1": d1,
+                            "Xuc_xac_2": d2,
+                            "Xuc_xac_3": d3,
+                            "Tong": total,
+                            "Ket_qua": ket_qua,
+                            "admin": "Duy Bảo"
+                        })
+                        
+                        predict_data.append({
+                            "phien": sid,
+                            "ket_qua": ket_qua,
+                            "tong": total,
+                            "xuc_xac": [d1, d2, d3]
+                        })
+            
+            # Sắp xếp theo phiên giảm dần (mới nhất đầu)
+            history_data.sort(key=lambda x: x.get("Phien", 0), reverse=True)
+            predict_data.sort(key=lambda x: x.get("phien", 0), reverse=True)
+            
+            return history_data, predict_data
+    
+    except Exception as e:
+        logger.error(f"Lỗi lấy full history {gid}: {e}")
+    
+    return [], []
+
+def load_full_history():
+    """Load toàn bộ lịch sử cho cả 2 bàn"""
+    global history_100, history_101, predict_history_100, predict_history_101
+    global latest_result_100, latest_result_101
+    
+    logger.info("🔄 Đang lấy toàn bộ lịch sử từ API...")
+    
+    # Lấy lịch sử bàn thường
+    hist_100, pred_100 = fetch_full_history("vgmn_100", False)
+    if hist_100:
+        history_100 = hist_100
+        predict_history_100 = pred_100
+        save_history(HISTORY_FILE_100, history_100)
+        save_history(PREDICT_FILE_100, predict_history_100)
+        
+        # Cập nhật kết quả mới nhất
+        if history_100:
+            latest_result_100.update(history_100[0])
+            save_data(DATA_FILE_100, latest_result_100)
+        
+        logger.info(f"✅ Đã lấy {len(history_100)} bản ghi bàn thường")
+        logger.info(f"✅ Đã lấy {len(predict_history_100)} bản ghi dự đoán bàn thường")
+    else:
+        logger.warning("⚠️ Không lấy được lịch sử bàn thường, sử dụng dữ liệu cũ")
+    
+    # Lấy lịch sử bàn MD5
+    hist_101, pred_101 = fetch_full_history("vgmn_101", True)
+    if hist_101:
+        history_101 = hist_101
+        predict_history_101 = pred_101
+        save_history(HISTORY_FILE_101, history_101)
+        save_history(PREDICT_FILE_101, predict_history_101)
+        
+        # Cập nhật kết quả mới nhất
+        if history_101:
+            latest_result_101.update(history_101[0])
+            save_data(DATA_FILE_101, latest_result_101)
+        
+        logger.info(f"✅ Đã lấy {len(history_101)} bản ghi bàn MD5")
+        logger.info(f"✅ Đã lấy {len(predict_history_101)} bản ghi dự đoán bàn MD5")
+    else:
+        logger.warning("⚠️ Không lấy được lịch sử bàn MD5, sử dụng dữ liệu cũ")
+    
+    # Cập nhật dự đoán từ lịch sử đã có
+    update_prediction_for_both()
+    
+    logger.info("✅ Hoàn tất tải lịch sử!")
+
+def update_prediction_for_both():
+    """Cập nhật dự đoán cho cả 2 bàn từ lịch sử đã có"""
+    with lock_100:
+        if predict_history_100:
+            du_doan = du_doan_ket_qua(predict_history_100)
+            latest_result_100["Du_doan"] = du_doan.get("Du_doan", "Chưa đủ dữ liệu")
+            latest_result_100["Do_tin_cay"] = du_doan.get("Do_tin_cay", 0)
+            save_data(DATA_FILE_100, latest_result_100)
+            logger.info(f"📊 Đã cập nhật dự đoán bàn thường: {latest_result_100['Du_doan']} (độ tin cậy {latest_result_100['Do_tin_cay']}%)")
+    
+    with lock_101:
+        if predict_history_101:
+            du_doan = du_doan_ket_qua(predict_history_101)
+            latest_result_101["Du_doan"] = du_doan.get("Du_doan", "Chưa đủ dữ liệu")
+            latest_result_101["Do_tin_cay"] = du_doan.get("Do_tin_cay", 0)
+            save_data(DATA_FILE_101, latest_result_101)
+            logger.info(f"📊 Đã cập nhật dự đoán bàn MD5: {latest_result_101['Du_doan']} (độ tin cậy {latest_result_101['Do_tin_cay']}%)")
 
 # ============== THUẬT TOÁN DỰ ĐOÁN ==============
 
@@ -227,12 +361,7 @@ def get_tai_xiu(d1, d2, d3):
     return "Xỉu" if total <= 10 else "Tài"
 
 def update_result(store, history, lock, result, predict_history, is_md5, data_file, hist_file, pred_file):
-    global current_session_100, current_session_101
-    
     with lock:
-        # Lấy phiên cũ để so sánh
-        old_phien = store.get("Phien", 0)
-        
         store.clear()
         store.update(result)
         history.insert(0, result.copy())
@@ -259,16 +388,6 @@ def update_result(store, history, lock, result, predict_history, is_md5, data_fi
         save_data(data_file, store)
         save_history(hist_file, history)
         save_history(pred_file, predict_history)
-        
-        # Kiểm tra xem có phiên mới không
-        new_phien = store.get("Phien", 0)
-        if new_phien != old_phien and new_phien > 0:
-            if is_md5:
-                current_session_101 = new_phien
-                logger.info(f"[MD5] 🔄 PHIÊN MỚI: {new_phien} - Web sẽ tự động cập nhật")
-            else:
-                current_session_100 = new_phien
-                logger.info(f"[TX] 🔄 PHIÊN MỚI: {new_phien} - Web sẽ tự động cập nhật")
 
 # ============== POLL API ==============
 
@@ -280,13 +399,15 @@ def poll_api(gid, lock, result_store, history, is_md5):
     if is_md5:
         predict_history = predict_history_101
         data_file = DATA_FILE_101
-        hist_file = 'history_101.json'
-        pred_file = 'predict_history_101.json'
+        hist_file = HISTORY_FILE_101
+        pred_file = PREDICT_FILE_101
+        last_sid = None
     else:
         predict_history = predict_history_100
         data_file = DATA_FILE_100
-        hist_file = 'history_100.json'
-        pred_file = 'predict_history_100.json'
+        hist_file = HISTORY_FILE_100
+        pred_file = PREDICT_FILE_100
+        last_sid = None
     
     while True:
         try:
@@ -372,35 +493,48 @@ def get_taixiu_101():
 def get_history():
     limit = request.args.get('limit', 50, type=int)
     with lock_100, lock_101:
-        hist_100 = load_history('history_100.json')
-        hist_101 = load_history('history_101.json')
+        hist_100 = load_history(HISTORY_FILE_100)
+        hist_101 = load_history(HISTORY_FILE_101)
         response = jsonify({
             "taixiu": hist_100[:limit],
             "taixiumd5": hist_101[:limit],
+            "taixiu_total": len(hist_100),
+            "taixiumd5_total": len(hist_101),
             "admin": "Duy Bảo"
         })
         response.headers['Content-Type'] = 'application/json; charset=utf-8'
         return response
 
-@app.route("/api/check_update", methods=["GET"])
-def check_update():
-    """API kiểm tra xem có phiên mới không"""
+@app.route("/api/predict_history", methods=["GET"])
+def get_predict_history():
+    """API xem lịch sử dự đoán"""
     gid = request.args.get('gid', '100')
-    current = request.args.get('current', 0, type=int)
+    limit = request.args.get('limit', 20, type=int)
     
     if gid == '100':
-        latest = current_session_100
+        pred_hist = load_history(PREDICT_FILE_100)
     else:
-        latest = current_session_101
+        pred_hist = load_history(PREDICT_FILE_101)
     
     return jsonify({
-        "has_update": latest > current,
-        "current_session": current,
-        "latest_session": latest,
+        "predict_history": pred_hist[:limit],
+        "total": len(pred_hist),
         "admin": "Duy Bảo"
     })
 
-# ============== TRANG CHỦ - TỰ ĐỘNG CẬP NHẬT ==============
+@app.route("/api/reload_history", methods=["GET"])
+def reload_history():
+    """API tải lại lịch sử từ nguồn"""
+    load_full_history()
+    return jsonify({
+        "status": "success",
+        "message": "Đã tải lại lịch sử",
+        "taixiu_count": len(history_100),
+        "taixiumd5_count": len(history_101),
+        "admin": "Duy Bảo"
+    })
+
+# ============== TRANG CHỦ ==============
 
 @app.route("/")
 def index():
@@ -456,15 +590,10 @@ def index():
                 color: #66dd88;
                 margin-top: 6px;
             }
-            .header .auto-update {
+            .header .info {
                 font-size: 12px;
-                color: #88ccff;
+                color: #6b7a8f;
                 margin-top: 4px;
-                animation: blink 2s infinite;
-            }
-            @keyframes blink {
-                0%, 100% { opacity: 1; }
-                50% { opacity: 0.3; }
             }
             .card {
                 background: #111827;
@@ -473,10 +602,6 @@ def index():
                 margin-bottom: 16px;
                 border: 1px solid #1f2937;
                 transition: all 0.3s ease;
-            }
-            .card.new-update {
-                border-color: #ffd700;
-                box-shadow: 0 0 20px rgba(255, 215, 0, 0.1);
             }
             .card h2 {
                 font-size: 16px;
@@ -493,15 +618,6 @@ def index():
                 border-radius: 20px;
                 color: #9ca3af;
             }
-            .card h2 .update-indicator {
-                font-size: 11px;
-                color: #ffd700;
-                display: none;
-            }
-            .card h2 .update-indicator.show {
-                display: inline;
-                animation: blink 1s infinite;
-            }
             .dice {
                 display: flex;
                 gap: 12px;
@@ -517,26 +633,10 @@ def index():
                 border: 1px solid #2a3a5e;
                 transition: all 0.5s ease;
             }
-            .dice-box.pop {
-                animation: pop 0.5s ease;
-            }
-            @keyframes pop {
-                0% { transform: scale(1); }
-                50% { transform: scale(1.2); background: #2a3a5e; }
-                100% { transform: scale(1); }
-            }
             .dice-box .number {
                 font-size: 32px;
                 font-weight: 700;
                 transition: all 0.3s ease;
-            }
-            .dice-box .number.pop-number {
-                animation: popNumber 0.5s ease;
-            }
-            @keyframes popNumber {
-                0% { transform: scale(1); }
-                50% { transform: scale(1.5); color: #ffd700; }
-                100% { transform: scale(1); }
             }
             .dice-box .label {
                 font-size: 11px;
@@ -564,14 +664,6 @@ def index():
                 font-weight: 600;
                 transition: all 0.3s ease;
             }
-            .result-row .value.pulse {
-                animation: pulse 0.5s ease;
-            }
-            @keyframes pulse {
-                0% { transform: scale(1); }
-                50% { transform: scale(1.3); }
-                100% { transform: scale(1); }
-            }
             .value.tai {
                 color: #ff6b6b;
             }
@@ -581,9 +673,6 @@ def index():
             .value.gold {
                 color: #ffd700;
             }
-            .value.blue {
-                color: #88ccff;
-            }
             .predict-box {
                 background: #0f1a2e;
                 border-radius: 10px;
@@ -591,10 +680,6 @@ def index():
                 margin-top: 10px;
                 border: 1px solid #1f3a5e;
                 transition: all 0.5s ease;
-            }
-            .predict-box.new-predict {
-                border-color: #ffd700;
-                background: #1a2a3a;
             }
             .predict-box .title {
                 font-size: 13px;
@@ -611,14 +696,6 @@ def index():
             }
             .predict-box .main.xiu {
                 color: #4ecdc4;
-            }
-            .predict-box .main.pop-predict {
-                animation: popPredict 0.5s ease;
-            }
-            @keyframes popPredict {
-                0% { transform: scale(1); }
-                50% { transform: scale(1.3); }
-                100% { transform: scale(1); }
             }
             .predict-box .sub {
                 font-size: 13px;
@@ -711,32 +788,6 @@ def index():
             .refresh-btn:active {
                 transform: scale(0.97);
             }
-            .loading {
-                color: #6b7a8f;
-                font-size: 14px;
-                text-align: center;
-                padding: 20px;
-            }
-            .toast {
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                background: #1a2a3a;
-                border: 1px solid #ffd700;
-                border-radius: 12px;
-                padding: 12px 20px;
-                color: #ffd700;
-                font-size: 14px;
-                z-index: 999;
-                opacity: 0;
-                transform: translateY(-20px);
-                transition: all 0.5s ease;
-                pointer-events: none;
-            }
-            .toast.show {
-                opacity: 1;
-                transform: translateY(0);
-            }
             @media (max-width: 480px) {
                 body { padding: 10px; }
                 .header h1 { font-size: 20px; }
@@ -746,32 +797,25 @@ def index():
                 .result-row .value { font-size: 14px; }
                 .endpoints .item { flex-direction: column; align-items: stretch; }
                 .endpoints .item code { font-size: 11px; }
-                .toast { top: 10px; right: 10px; left: 10px; font-size: 12px; }
             }
         </style>
     </head>
     <body>
-        <div class="toast" id="toast">🔄 Phiên mới đã cập nhật!</div>
-        
         <div class="container" id="app">
             <div class="header">
                 <h1>🎲 HIT Tài Xỉu</h1>
                 <div class="admin">👤 Admin: Duy Bảo</div>
                 <div class="status" id="status">🟢 Đang kết nối...</div>
-                <div class="auto-update">⚡ Tự động cập nhật khi có phiên mới</div>
+                <div class="info" id="info">📊 Đang tải lịch sử...</div>
             </div>
 
             <!-- BÀN THƯỜNG -->
-            <div class="card" id="card_100">
-                <h2>
-                    🎯 Bàn Thường 
-                    <span class="badge" id="phien_100">#---</span>
-                    <span class="update-indicator" id="indicator_100">🆕 Có phiên mới!</span>
-                </h2>
+            <div class="card">
+                <h2>🎯 Bàn Thường <span class="badge" id="phien_100">#---</span></h2>
                 <div class="dice" id="dice_100">
-                    <div class="dice-box" id="box1_100"><div class="number" id="d1_100">-</div><div class="label">Xúc xắc 1</div></div>
-                    <div class="dice-box" id="box2_100"><div class="number" id="d2_100">-</div><div class="label">Xúc xắc 2</div></div>
-                    <div class="dice-box" id="box3_100"><div class="number" id="d3_100">-</div><div class="label">Xúc xắc 3</div></div>
+                    <div class="dice-box"><div class="number" id="d1_100">-</div><div class="label">Xúc xắc 1</div></div>
+                    <div class="dice-box"><div class="number" id="d2_100">-</div><div class="label">Xúc xắc 2</div></div>
+                    <div class="dice-box"><div class="number" id="d3_100">-</div><div class="label">Xúc xắc 3</div></div>
                 </div>
                 <div class="result-row">
                     <span class="label">📊 Tổng điểm</span>
@@ -781,7 +825,7 @@ def index():
                     <span class="label">✅ Kết quả</span>
                     <span class="value" id="ketqua_100">Chưa có</span>
                 </div>
-                <div class="predict-box" id="predict_100">
+                <div class="predict-box">
                     <div class="title">🔮 Dự đoán phiên tiếp theo</div>
                     <div class="main" id="dudoan_100">Chưa đủ dữ liệu</div>
                     <div class="sub" id="lydo_100"></div>
@@ -795,16 +839,12 @@ def index():
             </div>
 
             <!-- BÀN MD5 -->
-            <div class="card" id="card_101">
-                <h2>
-                    🔐 Bàn MD5 
-                    <span class="badge" id="phien_101">#---</span>
-                    <span class="update-indicator" id="indicator_101">🆕 Có phiên mới!</span>
-                </h2>
+            <div class="card">
+                <h2>🔐 Bàn MD5 <span class="badge" id="phien_101">#---</span></h2>
                 <div class="dice" id="dice_101">
-                    <div class="dice-box" id="box1_101"><div class="number" id="d1_101">-</div><div class="label">Xúc xắc 1</div></div>
-                    <div class="dice-box" id="box2_101"><div class="number" id="d2_101">-</div><div class="label">Xúc xắc 2</div></div>
-                    <div class="dice-box" id="box3_101"><div class="number" id="d3_101">-</div><div class="label">Xúc xắc 3</div></div>
+                    <div class="dice-box"><div class="number" id="d1_101">-</div><div class="label">Xúc xắc 1</div></div>
+                    <div class="dice-box"><div class="number" id="d2_101">-</div><div class="label">Xúc xắc 2</div></div>
+                    <div class="dice-box"><div class="number" id="d3_101">-</div><div class="label">Xúc xắc 3</div></div>
                 </div>
                 <div class="result-row">
                     <span class="label">📊 Tổng điểm</span>
@@ -814,7 +854,7 @@ def index():
                     <span class="label">✅ Kết quả</span>
                     <span class="value" id="ketqua_101">Chưa có</span>
                 </div>
-                <div class="predict-box" id="predict_101">
+                <div class="predict-box">
                     <div class="title">🔮 Dự đoán phiên tiếp theo</div>
                     <div class="main" id="dudoan_101">Chưa đủ dữ liệu</div>
                     <div class="sub" id="lydo_101"></div>
@@ -845,6 +885,11 @@ def index():
                         <code>/api/history</code>
                         <span class="desc">Lịch sử</span>
                     </div>
+                    <div class="item">
+                        <span class="method">GET</span>
+                        <code>/api/reload_history</code>
+                        <span class="desc">Tải lại lịch sử</span>
+                    </div>
                 </div>
             </div>
 
@@ -854,155 +899,58 @@ def index():
         </div>
 
         <script>
-            // ========== BIẾN ==========
-            let currentSession100 = 0;
-            let currentSession101 = 0;
-            let data100 = {};
-            let data101 = {};
-            let isUpdating = false;
-
             // ========== FETCH DATA ==========
             async function fetchData() {
-                if (isUpdating) return;
-                isUpdating = true;
-
                 try {
                     // Fetch bàn thường
                     const res100 = await fetch('/api/taixiu');
-                    const newData100 = await res100.json();
-                    
+                    const data100 = await res100.json();
+                    updateUI(data100, '100');
+
                     // Fetch bàn MD5
                     const res101 = await fetch('/api/taixiumd5');
-                    const newData101 = await res101.json();
+                    const data101 = await res101.json();
+                    updateUI(data101, '101');
 
-                    // Kiểm tra cập nhật
-                    const oldPhien100 = data100.Phien || 0;
-                    const oldPhien101 = data101.Phien || 0;
-                    
-                    const hasUpdate100 = newData100.Phien > oldPhien100 && newData100.Phien > 0;
-                    const hasUpdate101 = newData101.Phien > oldPhien101 && newData101.Phien > 0;
-
-                    // Cập nhật dữ liệu
-                    data100 = newData100;
-                    data101 = newData101;
-
-                    // Cập nhật UI
-                    updateUI(data100, '100', hasUpdate100);
-                    updateUI(data101, '101', hasUpdate101);
-
-                    // Cập nhật phiên hiện tại
-                    if (hasUpdate100) {
-                        currentSession100 = data100.Phien;
-                        showToast('🔄 Bàn Thường - Phiên ' + data100.Phien);
-                    }
-                    if (hasUpdate101) {
-                        currentSession101 = data101.Phien;
-                        showToast('🔄 Bàn MD5 - Phiên ' + data101.Phien);
-                    }
+                    // Lấy thông tin history
+                    const resHist = await fetch('/api/history?limit=1');
+                    const histData = await resHist.json();
+                    document.getElementById('info').textContent = 
+                        `📊 Bàn thường: ${histData.taixiu_total || 0} phiên | Bàn MD5: ${histData.taixiumd5_total || 0} phiên`;
 
                     document.getElementById('status').textContent = '🟢 Đã cập nhật - ' + new Date().toLocaleTimeString();
                     document.getElementById('status').style.color = '#66dd88';
-
                 } catch (e) {
                     document.getElementById('status').textContent = '🔴 Lỗi kết nối';
                     document.getElementById('status').style.color = '#ff6b6b';
                     console.error('Fetch error:', e);
                 }
-                
-                isUpdating = false;
             }
 
             // ========== UPDATE UI ==========
-            function updateUI(data, suffix, hasUpdate) {
-                // Card
-                const card = document.getElementById('card_' + suffix);
-                if (hasUpdate) {
-                    card.classList.add('new-update');
-                    document.getElementById('indicator_' + suffix).classList.add('show');
-                } else {
-                    card.classList.remove('new-update');
-                    document.getElementById('indicator_' + suffix).classList.remove('show');
-                }
-                
+            function updateUI(data, suffix) {
                 // Phiên
-                const phien = data.Phien || 0;
-                document.getElementById('phien_' + suffix).textContent = '#' + (phien || '---');
+                document.getElementById('phien_' + suffix).textContent = '#' + (data.Phien || '---');
                 
-                // Xúc xắc - có hiệu ứng pop
-                const d1 = data.Xuc_xac_1 || '-';
-                const d2 = data.Xuc_xac_2 || '-';
-                const d3 = data.Xuc_xac_3 || '-';
-                
-                const d1El = document.getElementById('d1_' + suffix);
-                const d2El = document.getElementById('d2_' + suffix);
-                const d3El = document.getElementById('d3_' + suffix);
-                
-                if (hasUpdate && d1 !== '-') {
-                    d1El.textContent = d1;
-                    d2El.textContent = d2;
-                    d3El.textContent = d3;
-                    
-                    // Hiệu ứng pop
-                    const box1 = document.getElementById('box1_' + suffix);
-                    const box2 = document.getElementById('box2_' + suffix);
-                    const box3 = document.getElementById('box3_' + suffix);
-                    
-                    box1.classList.remove('pop');
-                    box2.classList.remove('pop');
-                    box3.classList.remove('pop');
-                    d1El.classList.remove('pop-number');
-                    d2El.classList.remove('pop-number');
-                    d3El.classList.remove('pop-number');
-                    
-                    void box1.offsetWidth; // Trigger reflow
-                    box1.classList.add('pop');
-                    box2.classList.add('pop');
-                    box3.classList.add('pop');
-                    d1El.classList.add('pop-number');
-                    d2El.classList.add('pop-number');
-                    d3El.classList.add('pop-number');
-                } else {
-                    d1El.textContent = d1;
-                    d2El.textContent = d2;
-                    d3El.textContent = d3;
-                }
+                // Xúc xắc
+                document.getElementById('d1_' + suffix).textContent = data.Xuc_xac_1 || '-';
+                document.getElementById('d2_' + suffix).textContent = data.Xuc_xac_2 || '-';
+                document.getElementById('d3_' + suffix).textContent = data.Xuc_xac_3 || '-';
                 
                 // Tổng
-                const tong = data.Tong || 0;
-                const tongEl = document.getElementById('tong_' + suffix);
-                tongEl.textContent = tong;
-                if (hasUpdate) {
-                    tongEl.classList.remove('pulse');
-                    void tongEl.offsetWidth;
-                    tongEl.classList.add('pulse');
-                }
+                document.getElementById('tong_' + suffix).textContent = data.Tong || 0;
                 
                 // Kết quả
                 const ketqua = data.Ket_qua || 'Chưa có';
                 const ketquaEl = document.getElementById('ketqua_' + suffix);
                 ketquaEl.textContent = ketqua;
                 ketquaEl.className = 'value ' + (ketqua === 'Tài' ? 'tai' : ketqua === 'Xỉu' ? 'xiu' : '');
-                if (hasUpdate && ketqua !== 'Chưa có') {
-                    ketquaEl.classList.remove('pulse');
-                    void ketquaEl.offsetWidth;
-                    ketquaEl.classList.add('pulse');
-                }
                 
                 // Dự đoán
                 const dudoan = data.Du_doan || 'Chưa đủ dữ liệu';
                 const dudoanEl = document.getElementById('dudoan_' + suffix);
                 dudoanEl.textContent = dudoan;
                 dudoanEl.className = 'main ' + (dudoan === 'Tài' ? 'tai' : dudoan === 'Xỉu' ? 'xiu' : '');
-                
-                const predictBox = document.getElementById('predict_' + suffix);
-                if (hasUpdate && dudoan !== 'Chưa đủ dữ liệu') {
-                    predictBox.classList.add('new-predict');
-                    dudoanEl.classList.remove('pop-predict');
-                    void dudoanEl.offsetWidth;
-                    dudoanEl.classList.add('pop-predict');
-                } else {
-                    predictBox.classList.remove('new-predict');
-                }
                 
                 // Lý do
                 document.getElementById('lydo_' + suffix).textContent = data.Ly_do || '';
@@ -1013,53 +961,9 @@ def index():
                 document.getElementById('do_tin_cay_text_' + suffix).textContent = doTinCay + '%';
             }
 
-            // ========== TOAST ==========
-            function showToast(message) {
-                const toast = document.getElementById('toast');
-                toast.textContent = message;
-                toast.classList.add('show');
-                clearTimeout(toast.timeout);
-                toast.timeout = setTimeout(() => {
-                    toast.classList.remove('show');
-                }, 3000);
-            }
-
-            // ========== CHECK UPDATE TỰ ĐỘNG ==========
-            async function checkAutoUpdate() {
-                try {
-                    // Kiểm tra bàn thường
-                    const res100 = await fetch('/api/check_update?gid=100&current=' + currentSession100);
-                    const check100 = await res100.json();
-                    
-                    // Kiểm tra bàn MD5
-                    const res101 = await fetch('/api/check_update?gid=101&current=' + currentSession101);
-                    const check101 = await res101.json();
-                    
-                    if (check100.has_update || check101.has_update) {
-                        fetchData();
-                    }
-                } catch (e) {
-                    // Silent fail
-                }
-            }
-
-            // ========== KHỞI TẠO ==========
+            // ========== AUTO REFRESH ==========
             fetchData();
-            
-            // Tự động cập nhật dữ liệu mỗi 5 giây
             setInterval(fetchData, 5000);
-            
-            // Kiểm tra phiên mới mỗi 2 giây (nhanh hơn)
-            setInterval(checkAutoUpdate, 2000);
-            
-            // Kiểm tra kết nối
-            setInterval(() => {
-                const status = document.getElementById('status');
-                if (!status.textContent.includes('Đã cập nhật')) {
-                    status.textContent = '🟡 Đang chờ...';
-                    status.style.color = '#ffd700';
-                }
-            }, 30000);
         </script>
     </body>
     </html>
@@ -1068,14 +972,24 @@ def index():
 # ============== MAIN ==============
 
 if __name__ == "__main__":
-    logger.info("Khởi động hệ thống API Tài Xỉu với tự động cập nhật...")
-    logger.info(f"Đã tải {len(history_100)} bản ghi bàn thường")
-    logger.info(f"Đã tải {len(history_101)} bản ghi bàn MD5")
+    logger.info("🚀 Khởi động hệ thống API Tài Xỉu...")
+    logger.info("=" * 50)
+    
+    # Load full lịch sử trước khi chạy
+    load_full_history()
+    
+    logger.info("=" * 50)
+    logger.info("🔄 Bắt đầu polling dữ liệu mới...")
+    
+    last_sid_100 = None
+    last_sid_101 = None
+    sid_for_tx = None
     
     thread_100 = threading.Thread(target=poll_api, args=("vgmn_100", lock_100, latest_result_100, history_100, False), daemon=True)
     thread_101 = threading.Thread(target=poll_api, args=("vgmn_101", lock_101, latest_result_101, history_101, True), daemon=True)
     thread_100.start()
     thread_101.start()
-    logger.info("Đã bắt đầu polling dữ liệu.")
+    
+    logger.info("✅ Đã bắt đầu polling dữ liệu.")
     port = int(os.environ.get("PORT", 8000))
     app.run(host=HOST, port=port)
