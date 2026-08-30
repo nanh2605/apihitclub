@@ -7,6 +7,7 @@ from urllib.request import urlopen, Request
 from flask import Flask, jsonify, request
 from datetime import datetime
 import random
+from collections import Counter
 
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
@@ -28,7 +29,6 @@ PREDICT_FILE_100 = 'predict_history_100.json'
 PREDICT_FILE_101 = 'predict_history_101.json'
 
 def save_data(file_path, data):
-    """Lưu dữ liệu vào file JSON"""
     try:
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -38,7 +38,6 @@ def save_data(file_path, data):
         return False
 
 def load_data(file_path, default_data):
-    """Đọc dữ liệu từ file JSON"""
     try:
         if os.path.exists(file_path):
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -53,7 +52,6 @@ def load_data(file_path, default_data):
     return default_data.copy()
 
 def load_history(file_path):
-    """Đọc lịch sử từ file"""
     try:
         if os.path.exists(file_path):
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -63,7 +61,6 @@ def load_history(file_path):
     return []
 
 def save_history(file_path, history):
-    """Lưu lịch sử vào file"""
     try:
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(history, f, ensure_ascii=False, indent=2)
@@ -72,14 +69,15 @@ def save_history(file_path, history):
         logger.error(f"Lỗi lưu history {file_path}: {e}")
         return False
 
-# ============== LẤY LỊCH SỬ TỪ API ==============
+# ============== LẤY LỊCH SỬ TỪ API HISTORY ==============
 
 def fetch_history_from_api(gid, is_md5):
-    """Lấy lịch sử từ API và trả về dữ liệu"""
+    """Lấy lịch sử từ API /api/history"""
     history_data = []
     predict_data = []
     
     try:
+        # Gọi API history để lấy lịch sử
         url = f"https://jakpotgwab.geightdors.net/glms/v1/notify/taixiu?platform_id=g8&gid={gid}"
         req = Request(url, headers={'User-Agent': 'Python-Proxy/1.0'})
         with urlopen(req, timeout=10) as resp:
@@ -142,6 +140,7 @@ def fetch_history_from_api(gid, is_md5):
         history_data.sort(key=lambda x: x.get("Phien", 0), reverse=True)
         predict_data.sort(key=lambda x: x.get("phien", 0), reverse=True)
         
+        logger.info(f"✅ Đã lấy {len(history_data)} bản ghi từ API history cho {gid}")
         return history_data, predict_data
         
     except Exception as e:
@@ -150,12 +149,12 @@ def fetch_history_from_api(gid, is_md5):
     return [], []
 
 def load_full_history():
-    """Load toàn bộ lịch sử và cập nhật dự đoán"""
+    """Load toàn bộ lịch sử và cập nhật dự đoán ngay lập tức"""
     global history_100, history_101, predict_history_100, predict_history_101
     global latest_result_100, latest_result_101
     
     logger.info("=" * 50)
-    logger.info("🔄 ĐANG LẤY LỊCH SỬ TỪ API...")
+    logger.info("🔄 ĐANG LẤY LỊCH SỬ TỪ API HISTORY...")
     
     # Lấy lịch sử bàn thường
     hist_100, pred_100 = fetch_history_from_api("vgmn_100", False)
@@ -165,7 +164,6 @@ def load_full_history():
         save_history(HISTORY_FILE_100, history_100)
         save_history(PREDICT_FILE_100, predict_history_100)
         
-        # Cập nhật kết quả mới nhất
         if history_100:
             latest_result_100.update(history_100[0])
             save_data(DATA_FILE_100, latest_result_100)
@@ -182,7 +180,6 @@ def load_full_history():
         save_history(HISTORY_FILE_101, history_101)
         save_history(PREDICT_FILE_101, predict_history_101)
         
-        # Cập nhật kết quả mới nhất
         if history_101:
             latest_result_101.update(history_101[0])
             save_data(DATA_FILE_101, latest_result_101)
@@ -191,46 +188,230 @@ def load_full_history():
     else:
         logger.warning("⚠️ Không lấy được lịch sử bàn MD5, dùng dữ liệu cũ")
     
-    # Cập nhật dự đoán từ lịch sử
+    # Cập nhật dự đoán ngay lập tức
     update_predictions()
     
     logger.info("✅ HOÀN TẤT LẤY LỊCH SỬ!")
     logger.info("=" * 50)
 
 def update_predictions():
-    """Cập nhật dự đoán cho cả 2 bàn từ lịch sử đã có"""
+    """Cập nhật dự đoán từ lịch sử đã có"""
     
-    # Cập nhật bàn thường
     with lock_100:
         if predict_history_100:
-            du_doan = du_doan_ket_qua(predict_history_100)
+            du_doan = du_doan_ai_thong_minh(predict_history_100)
             latest_result_100["Du_doan"] = du_doan.get("Du_doan", "Chưa đủ dữ liệu")
             latest_result_100["Do_tin_cay"] = du_doan.get("Do_tin_cay", 0)
             latest_result_100["Ly_do"] = du_doan.get("Ly_do", "")
+            latest_result_100["Chien_luoc"] = du_doan.get("Chien_luoc", "")
+            latest_result_100["So_phien_phan_tich"] = len(predict_history_100)
             save_data(DATA_FILE_100, latest_result_100)
-            logger.info(f"📊 Dự đoán bàn thường: {latest_result_100['Du_doan']} (độ tin cậy {latest_result_100['Do_tin_cay']}%)")
+            logger.info(f"📊 Dự đoán bàn thường: {latest_result_100['Du_doan']} (độ tin cậy {latest_result_100['Do_tin_cay']}%) - {latest_result_100['Chien_luoc']}")
         else:
             latest_result_100["Du_doan"] = "Chưa có dữ liệu lịch sử"
             latest_result_100["Do_tin_cay"] = 0
-            latest_result_100["Ly_do"] = "Chưa có dữ liệu lịch sử"
+            latest_result_100["Ly_do"] = "Hãy đợi phiên mới hoặc tải lại lịch sử"
+            latest_result_100["Chien_luoc"] = "Không có dữ liệu"
+            latest_result_100["So_phien_phan_tich"] = 0
             save_data(DATA_FILE_100, latest_result_100)
     
-    # Cập nhật bàn MD5
     with lock_101:
         if predict_history_101:
-            du_doan = du_doan_ket_qua(predict_history_101)
+            du_doan = du_doan_ai_thong_minh(predict_history_101)
             latest_result_101["Du_doan"] = du_doan.get("Du_doan", "Chưa đủ dữ liệu")
             latest_result_101["Do_tin_cay"] = du_doan.get("Do_tin_cay", 0)
             latest_result_101["Ly_do"] = du_doan.get("Ly_do", "")
+            latest_result_101["Chien_luoc"] = du_doan.get("Chien_luoc", "")
+            latest_result_101["So_phien_phan_tich"] = len(predict_history_101)
             save_data(DATA_FILE_101, latest_result_101)
-            logger.info(f"📊 Dự đoán bàn MD5: {latest_result_101['Du_doan']} (độ tin cậy {latest_result_101['Do_tin_cay']}%)")
+            logger.info(f"📊 Dự đoán bàn MD5: {latest_result_101['Du_doan']} (độ tin cậy {latest_result_101['Do_tin_cay']}%) - {latest_result_101['Chien_luoc']}")
         else:
             latest_result_101["Du_doan"] = "Chưa có dữ liệu lịch sử"
             latest_result_101["Do_tin_cay"] = 0
-            latest_result_101["Ly_do"] = "Chưa có dữ liệu lịch sử"
+            latest_result_101["Ly_do"] = "Hãy đợi phiên mới hoặc tải lại lịch sử"
+            latest_result_101["Chien_luoc"] = "Không có dữ liệu"
+            latest_result_101["So_phien_phan_tich"] = 0
             save_data(DATA_FILE_101, latest_result_101)
 
-# ============== DỮ LIỆU KHỞI TẠO ==============
+# ============== THUẬT TOÁN DỰ ĐOÁN AI THÔNG MINH ==============
+
+def du_doan_ai_thong_minh(predict_history):
+    """
+    Dự đoán kết quả tiếp theo với AI thông minh
+    """
+    
+    if len(predict_history) < 3:
+        return {
+            "Du_doan": "Chưa đủ dữ liệu",
+            "Do_tin_cay": 0,
+            "Ly_do": f"Cần ít nhất 3 phiên, hiện có {len(predict_history)} phiên",
+            "Chien_luoc": "Chờ dữ liệu"
+        }
+    
+    # Lấy kết quả và tổng điểm
+    results = [r["ket_qua"] for r in predict_history[:20]]
+    tong_list = [r.get("tong", 0) for r in predict_history[:20] if r.get("tong", 0) > 0]
+    
+    tai_count = results.count("Tài")
+    xiu_count = results.count("Xỉu")
+    total = len(results)
+    
+    # ===== PHÂN TÍCH CHUỖI (CHAIN ANALYSIS) =====
+    chains = []
+    current_chain = 1
+    for i in range(1, len(results)):
+        if results[i] == results[i-1]:
+            current_chain += 1
+        else:
+            chains.append((results[i-1], current_chain))
+            current_chain = 1
+    chains.append((results[-1], current_chain))
+    
+    # Tìm chuỗi dài nhất
+    max_chain = max([c[1] for c in chains]) if chains else 0
+    current_result = results[0] if results else ""
+    
+    # ===== PHÂN TÍCH TẦN SUẤT (FREQUENCY ANALYSIS) =====
+    tai_ratio = tai_count / total * 100
+    xiu_ratio = xiu_count / total * 100
+    
+    # ===== PHÂN TÍCH TỔNG ĐIỂM =====
+    if tong_list:
+        tong_trung_binh = sum(tong_list) / len(tong_list)
+        tong_max = max(tong_list)
+        tong_min = min(tong_list)
+    else:
+        tong_trung_binh = 10.5
+        tong_max = 0
+        tong_min = 0
+    
+    # ===== CHIẾN LƯỢC DỰ ĐOÁN =====
+    
+    # 1. BẮT BỆT - Khi có chuỗi dài
+    if max_chain >= 4:
+        if current_result == "Tài":
+            return {
+                "Du_doan": "Xỉu",
+                "Do_tin_cay": min(85, 60 + max_chain * 5),
+                "Ly_do": f"Chuỗi {max_chain} phiên Tài liên tiếp, xác suất đảo chiều cao",
+                "Chien_luoc": "Bắt bệt đảo"
+            }
+        elif current_result == "Xỉu":
+            return {
+                "Du_doan": "Tài",
+                "Do_tin_cay": min(85, 60 + max_chain * 5),
+                "Ly_do": f"Chuỗi {max_chain} phiên Xỉu liên tiếp, xác suất đảo chiều cao",
+                "Chien_luoc": "Bắt bệt đảo"
+            }
+    
+    # 2. PATTERN XEN KẼ (Alternating Pattern)
+    if len(results) >= 5:
+        last_5 = results[:5]
+        # Kiểm tra pattern T-X-T-X-T
+        if last_5[0] == "Tài" and last_5[1] == "Xỉu" and last_5[2] == "Tài" and last_5[3] == "Xỉu" and last_5[4] == "Tài":
+            return {
+                "Du_doan": "Xỉu",
+                "Do_tin_cay": 75,
+                "Ly_do": "Pattern T-X-T-X-T, dự đoán Xỉu tiếp theo",
+                "Chien_luoc": "Pattern xen kẽ"
+            }
+        if last_5[0] == "Xỉu" and last_5[1] == "Tài" and last_5[2] == "Xỉu" and last_5[3] == "Tài" and last_5[4] == "Xỉu":
+            return {
+                "Du_doan": "Tài",
+                "Do_tin_cay": 75,
+                "Ly_do": "Pattern X-T-X-T-X, dự đoán Tài tiếp theo",
+                "Chien_luoc": "Pattern xen kẽ"
+            }
+    
+    # 3. THEO XU HƯỚNG (Trend Following)
+    if len(results) >= 10:
+        # Lấy 10 phiên gần nhất
+        recent_10 = results[:10]
+        tai_10 = recent_10.count("Tài")
+        xiu_10 = recent_10.count("Xỉu")
+        
+        # Nếu 1 bên chiếm > 60% trong 10 phiên
+        if tai_10 >= 7:
+            return {
+                "Du_doan": "Tài",
+                "Do_tin_cay": 70,
+                "Ly_do": f"Tài chiếm {tai_10}/10 phiên gần nhất, xu hướng mạnh",
+                "Chien_luoc": "Theo xu hướng Tài"
+            }
+        if xiu_10 >= 7:
+            return {
+                "Du_doan": "Xỉu",
+                "Do_tin_cay": 70,
+                "Ly_do": f"Xỉu chiếm {xiu_10}/10 phiên gần nhất, xu hướng mạnh",
+                "Chien_luoc": "Theo xu hướng Xỉu"
+            }
+    
+    # 4. PHÂN TÍCH TỔNG ĐIỂM (Total Analysis)
+    if tong_list and len(tong_list) >= 5:
+        # Nếu tổng TB > 12 -> nghiêng Tài
+        if tong_trung_binh > 12.5:
+            return {
+                "Du_doan": "Tài",
+                "Do_tin_cay": 62,
+                "Ly_do": f"Tổng TB {round(tong_trung_binh, 1)} > 12.5, nghiêng về Tài",
+                "Chien_luoc": "Phân tích tổng điểm"
+            }
+        # Nếu tổng TB < 8.5 -> nghiêng Xỉu
+        if tong_trung_binh < 8.5:
+            return {
+                "Du_doan": "Xỉu",
+                "Do_tin_cay": 62,
+                "Ly_do": f"Tổng TB {round(tong_trung_binh, 1)} < 8.5, nghiêng về Xỉu",
+                "Chien_luoc": "Phân tích tổng điểm"
+            }
+    
+    # 5. TỶ LỆ TỔNG THỂ (Overall Ratio)
+    if total >= 10:
+        if tai_ratio >= 58:
+            return {
+                "Du_doan": "Tài",
+                "Do_tin_cay": round(tai_ratio, 1),
+                "Ly_do": f"Tài chiếm {round(tai_ratio, 1)}% trong {total} phiên",
+                "Chien_luoc": "Tỷ lệ tổng thể"
+            }
+        if xiu_ratio >= 58:
+            return {
+                "Du_doan": "Xỉu",
+                "Do_tin_cay": round(xiu_ratio, 1),
+                "Ly_do": f"Xỉu chiếm {round(xiu_ratio, 1)}% trong {total} phiên",
+                "Chien_luoc": "Tỷ lệ tổng thể"
+            }
+    
+    # 6. MẶC ĐỊNH - Dựa vào kết quả gần nhất
+    if results:
+        # Nếu 2 phiên gần nhất khác nhau -> theo phiên cuối
+        if len(results) >= 2 and results[0] != results[1]:
+            return {
+                "Du_doan": results[0],
+                "Do_tin_cay": 55,
+                "Ly_do": f"Theo kết quả gần nhất ({results[0]})",
+                "Chien_luoc": "Theo xu hướng cuối"
+            }
+        
+        # Nếu tỷ lệ Tài/Xỉu cân bằng -> dự đoán ngẫu nhiên có kiểm soát
+        if abs(tai_ratio - xiu_ratio) < 10:
+            # Ưu tiên dự đoán theo phiên gần nhất
+            return {
+                "Du_doan": results[0],
+                "Do_tin_cay": 50,
+                "Ly_do": f"Dữ liệu cân bằng ({round(tai_ratio, 1)}% - {round(xiu_ratio, 1)}%), theo phiên gần nhất",
+                "Chien_luoc": "Cân bằng"
+            }
+    
+    # 7. DỰ ĐOÁN CUỐI CÙNG
+    return {
+        "Du_doan": random.choice(["Tài", "Xỉu"]),
+        "Do_tin_cay": 50,
+        "Ly_do": "Không có mẫu hình rõ ràng, dự đoán ngẫu nhiên",
+        "Chien_luoc": "Ngẫu nhiên"
+    }
+
+# ============== HÀM CHÍNH ==============
 
 default_result = {
     "Phien": 0,
@@ -242,6 +423,8 @@ default_result = {
     "Du_doan": "Chưa đủ dữ liệu",
     "Do_tin_cay": 0,
     "Ly_do": "",
+    "Chien_luoc": "",
+    "So_phien_phan_tich": 0,
     "admin": "Duy Bảo"
 }
 
@@ -249,7 +432,6 @@ default_result = {
 latest_result_100 = load_data(DATA_FILE_100, default_result)
 latest_result_101 = load_data(DATA_FILE_101, default_result)
 
-# Đảm bảo có admin
 latest_result_100["admin"] = "Duy Bảo"
 latest_result_101["admin"] = "Duy Bảo"
 
@@ -265,118 +447,8 @@ last_sid_100 = None
 last_sid_101 = None
 sid_for_tx = None
 
-# Biến lưu phiên hiện tại để kiểm tra cập nhật
 current_session_100 = latest_result_100.get("Phien", 0)
 current_session_101 = latest_result_101.get("Phien", 0)
-
-# ============== THUẬT TOÁN DỰ ĐOÁN ==============
-
-def du_doan_ket_qua(predict_history):
-    """
-    Dự đoán kết quả tiếp theo
-    predict_history: list các dict có key 'ket_qua'
-    """
-    
-    if len(predict_history) < 3:
-        return {
-            "Du_doan": "Chưa đủ dữ liệu",
-            "Do_tin_cay": 0,
-            "Ly_do": f"Cần ít nhất 3 phiên, hiện có {len(predict_history)} phiên"
-        }
-    
-    # Lấy kết quả gần nhất
-    recent = [r["ket_qua"] for r in predict_history[:10]]
-    tai_count = recent.count("Tài")
-    xiu_count = recent.count("Xỉu")
-    total = len(recent)
-    
-    # ===== LOGIC DỰ ĐOÁN =====
-    
-    # 1. Kiểm tra chuỗi 3 phiên liên tiếp
-    last_3 = predict_history[:3]
-    last_3_result = [r["ket_qua"] for r in last_3]
-    
-    if last_3_result == ["Tài", "Tài", "Tài"]:
-        return {
-            "Du_doan": "Xỉu",
-            "Do_tin_cay": 72,
-            "Ly_do": "3 phiên Tài liên tiếp, khả năng đảo chiều sang Xỉu"
-        }
-    
-    if last_3_result == ["Xỉu", "Xỉu", "Xỉu"]:
-        return {
-            "Du_doan": "Tài",
-            "Do_tin_cay": 72,
-            "Ly_do": "3 phiên Xỉu liên tiếp, khả năng đảo chiều sang Tài"
-        }
-    
-    # 2. Pattern xen kẽ
-    if len(last_3_result) >= 3:
-        if last_3_result[0] == "Tài" and last_3_result[1] == "Xỉu" and last_3_result[2] == "Tài":
-            return {
-                "Du_doan": "Xỉu",
-                "Do_tin_cay": 65,
-                "Ly_do": "Pattern Tài-Xỉu-Tài, dự đoán Xỉu tiếp theo"
-            }
-        if last_3_result[0] == "Xỉu" and last_3_result[1] == "Tài" and last_3_result[2] == "Xỉu":
-            return {
-                "Du_doan": "Tài",
-                "Do_tin_cay": 65,
-                "Ly_do": "Pattern Xỉu-Tài-Xỉu, dự đoán Tài tiếp theo"
-            }
-    
-    # 3. Tỷ lệ
-    tai_ratio = tai_count / total * 100
-    xiu_ratio = xiu_count / total * 100
-    
-    if tai_ratio >= 65:
-        return {
-            "Du_doan": "Tài",
-            "Do_tin_cay": round(tai_ratio, 1),
-            "Ly_do": f"Tài chiếm {round(tai_ratio, 1)}% trong {total} phiên gần nhất"
-        }
-    
-    if xiu_ratio >= 65:
-        return {
-            "Du_doan": "Xỉu",
-            "Do_tin_cay": round(xiu_ratio, 1),
-            "Ly_do": f"Xỉu chiếm {round(xiu_ratio, 1)}% trong {total} phiên gần nhất"
-        }
-    
-    # 4. Tổng điểm trung bình
-    tong_list = [r.get("tong", 0) for r in predict_history[:5] if r.get("tong")]
-    if tong_list:
-        tong_trung_binh = sum(tong_list) / len(tong_list)
-        
-        if tong_trung_binh > 11:
-            return {
-                "Du_doan": "Tài",
-                "Do_tin_cay": 55,
-                "Ly_do": f"Tổng TB {round(tong_trung_binh, 1)} > 11, nghiêng về Tài"
-            }
-        
-        if tong_trung_binh < 10:
-            return {
-                "Du_doan": "Xỉu",
-                "Do_tin_cay": 55,
-                "Ly_do": f"Tổng TB {round(tong_trung_binh, 1)} < 10, nghiêng về Xỉu"
-            }
-    
-    # 5. Mặc định
-    if tai_count > xiu_count:
-        return {
-            "Du_doan": "Tài",
-            "Do_tin_cay": 52,
-            "Ly_do": f"Tài có xu hướng nhỉnh hơn ({tai_count}/{total} phiên)"
-        }
-    else:
-        return {
-            "Du_doan": "Xỉu",
-            "Do_tin_cay": 52,
-            "Ly_do": f"Xỉu có xu hướng nhỉnh hơn ({xiu_count}/{total} phiên)"
-        }
-
-# ============== HÀM CHÍNH ==============
 
 def get_tai_xiu(d1, d2, d3):
     total = d1 + d2 + d3
@@ -386,7 +458,6 @@ def update_result(store, history, lock, result, predict_history, is_md5, data_fi
     global current_session_100, current_session_101
     
     with lock:
-        # Lấy phiên cũ để so sánh
         old_phien = store.get("Phien", 0)
         
         store.clear()
@@ -395,7 +466,6 @@ def update_result(store, history, lock, result, predict_history, is_md5, data_fi
         if len(history) > MAX_HISTORY:
             history.pop()
         
-        # Lưu vào lịch sử dự đoán
         if result.get("Ket_qua") and result.get("Ket_qua") != "Chưa có":
             predict_history.insert(0, {
                 "phien": result.get("Phien"),
@@ -406,18 +476,18 @@ def update_result(store, history, lock, result, predict_history, is_md5, data_fi
             if len(predict_history) > MAX_PREDICT_HISTORY:
                 predict_history.pop()
         
-        # Cập nhật dự đoán vào store
-        du_doan_result = du_doan_ket_qua(predict_history)
+        # Cập nhật dự đoán với AI
+        du_doan_result = du_doan_ai_thong_minh(predict_history)
         store["Du_doan"] = du_doan_result.get("Du_doan", "Chưa đủ dữ liệu")
         store["Do_tin_cay"] = du_doan_result.get("Do_tin_cay", 0)
         store["Ly_do"] = du_doan_result.get("Ly_do", "")
+        store["Chien_luoc"] = du_doan_result.get("Chien_luoc", "")
+        store["So_phien_phan_tich"] = len(predict_history)
         
-        # Lưu vào file
         save_data(data_file, store)
         save_history(hist_file, history)
         save_history(pred_file, predict_history)
         
-        # Kiểm tra xem có phiên mới không
         new_phien = store.get("Phien", 0)
         if new_phien != old_phien and new_phien > 0:
             if is_md5:
@@ -427,13 +497,10 @@ def update_result(store, history, lock, result, predict_history, is_md5, data_fi
                 current_session_100 = new_phien
                 logger.info(f"[TX] 🔄 PHIÊN MỚI: {new_phien}")
 
-# ============== POLL API ==============
-
 def poll_api(gid, lock, result_store, history, is_md5):
     global last_sid_100, last_sid_101, sid_for_tx
     url = f"https://jakpotgwab.geightdors.net/glms/v1/notify/taixiu?platform_id=g8&gid={gid}"
     
-    # Chọn file và history tương ứng
     if is_md5:
         predict_history = predict_history_101
         data_file = DATA_FILE_101
@@ -505,15 +572,11 @@ def poll_api(gid, lock, result_store, history, is_md5):
 
 app = Flask(__name__)
 
-# ============== API ==============
-
 @app.route("/api/taixiu", methods=["GET"])
 def get_taixiu_100():
     with lock_100:
         data = load_data(DATA_FILE_100, default_result)
         data["admin"] = "Duy Bảo"
-        # Thêm thông tin số phiên đã phân tích
-        data["So_phien_da_phan_tich"] = len(predict_history_100)
         response = jsonify(data)
         response.headers['Content-Type'] = 'application/json; charset=utf-8'
         return response
@@ -523,7 +586,6 @@ def get_taixiu_101():
     with lock_101:
         data = load_data(DATA_FILE_101, default_result)
         data["admin"] = "Duy Bảo"
-        data["So_phien_da_phan_tich"] = len(predict_history_101)
         response = jsonify(data)
         response.headers['Content-Type'] = 'application/json; charset=utf-8'
         return response
@@ -546,7 +608,6 @@ def get_history():
 
 @app.route("/api/reload_history", methods=["GET"])
 def reload_history():
-    """API tải lại lịch sử từ nguồn"""
     load_full_history()
     return jsonify({
         "status": "success",
@@ -558,7 +619,6 @@ def reload_history():
 
 @app.route("/api/check_update", methods=["GET"])
 def check_update():
-    """API kiểm tra xem có phiên mới không"""
     gid = request.args.get('gid', '100')
     current = request.args.get('current', 0, type=int)
     
@@ -586,11 +646,7 @@ def index():
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
         <title>🎲 HIT API - Tài Xỉu</title>
         <style>
-            * {
-                margin: 0;
-                padding: 0;
-                box-sizing: border-box;
-            }
+            * { margin: 0; padding: 0; box-sizing: border-box; }
             body {
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
                 background: #0a0e17;
@@ -601,11 +657,7 @@ def index():
                 justify-content: center;
                 align-items: flex-start;
             }
-            .container {
-                max-width: 800px;
-                width: 100%;
-                margin: 0 auto;
-            }
+            .container { max-width: 800px; width: 100%; margin: 0 auto; }
             .header {
                 background: linear-gradient(135deg, #1a1a2e, #16213e);
                 border-radius: 16px;
@@ -613,35 +665,17 @@ def index():
                 margin-bottom: 20px;
                 text-align: center;
                 border: 1px solid #2a3a5e;
-                position: relative;
             }
-            .header h1 {
-                font-size: 24px;
-                color: #ffd700;
-                margin-bottom: 4px;
-            }
-            .header .admin {
-                font-size: 14px;
-                color: #88ccff;
-                opacity: 0.8;
-            }
-            .header .status {
-                font-size: 13px;
-                color: #66dd88;
-                margin-top: 6px;
-            }
-            .header .info {
-                font-size: 12px;
-                color: #6b7a8f;
-                margin-top: 4px;
-            }
+            .header h1 { font-size: 24px; color: #ffd700; margin-bottom: 4px; }
+            .header .admin { font-size: 14px; color: #88ccff; opacity: 0.8; }
+            .header .status { font-size: 13px; color: #66dd88; margin-top: 6px; }
+            .header .info { font-size: 12px; color: #6b7a8f; margin-top: 4px; }
             .card {
                 background: #111827;
                 border-radius: 12px;
                 padding: 16px;
                 margin-bottom: 16px;
                 border: 1px solid #1f2937;
-                transition: all 0.3s ease;
             }
             .card h2 {
                 font-size: 16px;
@@ -671,18 +705,9 @@ def index():
                 text-align: center;
                 min-width: 60px;
                 border: 1px solid #2a3a5e;
-                transition: all 0.5s ease;
             }
-            .dice-box .number {
-                font-size: 32px;
-                font-weight: 700;
-                transition: all 0.3s ease;
-            }
-            .dice-box .label {
-                font-size: 11px;
-                color: #6b7a8f;
-                margin-top: 2px;
-            }
+            .dice-box .number { font-size: 32px; font-weight: 700; }
+            .dice-box .label { font-size: 11px; color: #6b7a8f; margin-top: 2px; }
             .result-row {
                 display: flex;
                 justify-content: space-between;
@@ -692,55 +717,32 @@ def index():
                 flex-wrap: wrap;
                 gap: 8px;
             }
-            .result-row:last-child {
-                border-bottom: none;
-            }
-            .result-row .label {
-                font-size: 14px;
-                color: #9ca3af;
-            }
-            .result-row .value {
-                font-size: 16px;
-                font-weight: 600;
-                transition: all 0.3s ease;
-            }
-            .value.tai {
-                color: #ff6b6b;
-            }
-            .value.xiu {
-                color: #4ecdc4;
-            }
-            .value.gold {
-                color: #ffd700;
-            }
+            .result-row:last-child { border-bottom: none; }
+            .result-row .label { font-size: 14px; color: #9ca3af; }
+            .result-row .value { font-size: 16px; font-weight: 600; }
+            .value.tai { color: #ff6b6b; }
+            .value.xiu { color: #4ecdc4; }
+            .value.gold { color: #ffd700; }
             .predict-box {
                 background: #0f1a2e;
                 border-radius: 10px;
                 padding: 14px;
                 margin-top: 10px;
                 border: 1px solid #1f3a5e;
-                transition: all 0.5s ease;
             }
-            .predict-box .title {
-                font-size: 13px;
-                color: #9ca3af;
-                margin-bottom: 6px;
-            }
-            .predict-box .main {
-                font-size: 22px;
-                font-weight: 700;
-                transition: all 0.3s ease;
-            }
-            .predict-box .main.tai {
-                color: #ff6b6b;
-            }
-            .predict-box .main.xiu {
-                color: #4ecdc4;
-            }
-            .predict-box .sub {
-                font-size: 13px;
-                color: #9ca3af;
+            .predict-box .title { font-size: 13px; color: #9ca3af; margin-bottom: 6px; }
+            .predict-box .main { font-size: 22px; font-weight: 700; }
+            .predict-box .main.tai { color: #ff6b6b; }
+            .predict-box .main.xiu { color: #4ecdc4; }
+            .predict-box .sub { font-size: 13px; color: #9ca3af; margin-top: 4px; }
+            .predict-box .strategy {
+                font-size: 12px;
+                color: #88ccff;
                 margin-top: 4px;
+                background: #1a2236;
+                padding: 4px 10px;
+                border-radius: 6px;
+                display: inline-block;
             }
             .predict-box .confidence {
                 margin-top: 8px;
@@ -767,9 +769,12 @@ def index():
                 min-width: 40px;
                 text-align: right;
             }
-            .endpoints {
-                margin-top: 16px;
+            .predict-box .analyze-count {
+                font-size: 11px;
+                color: #6b7a8f;
+                margin-top: 6px;
             }
+            .endpoints { margin-top: 16px; }
             .endpoints .item {
                 background: #0f1a2e;
                 padding: 10px 14px;
@@ -790,10 +795,7 @@ def index():
                 color: #88ccff;
                 word-break: break-all;
             }
-            .endpoints .item .desc {
-                font-size: 13px;
-                color: #9ca3af;
-            }
+            .endpoints .item .desc { font-size: 13px; color: #9ca3af; }
             .endpoints .item .method {
                 font-size: 11px;
                 font-weight: 600;
@@ -822,11 +824,14 @@ def index():
                 width: 100%;
                 margin-top: 8px;
             }
-            .refresh-btn:hover {
-                background: #2a3a5e;
-            }
-            .refresh-btn:active {
-                transform: scale(0.97);
+            .refresh-btn:hover { background: #2a3a5e; }
+            .strategy-badge {
+                font-size: 11px;
+                background: #1a2a3a;
+                padding: 2px 12px;
+                border-radius: 12px;
+                color: #88ccff;
+                border: 1px solid #2a3a5e;
             }
             @media (max-width: 480px) {
                 body { padding: 10px; }
@@ -866,14 +871,18 @@ def index():
                     <span class="value" id="ketqua_100">Chưa có</span>
                 </div>
                 <div class="predict-box">
-                    <div class="title">🔮 Dự đoán phiên tiếp theo</div>
+                    <div class="title">🔮 Dự đoán phiên tiếp theo (AI)</div>
                     <div class="main" id="dudoan_100">Chưa đủ dữ liệu</div>
                     <div class="sub" id="lydo_100"></div>
+                    <div>
+                        <span class="strategy-badge" id="chienluoc_100">Chờ dữ liệu</span>
+                    </div>
                     <div class="confidence">
                         <span style="font-size:13px;color:#9ca3af;">Độ tin cậy</span>
                         <div class="bar"><div class="fill" id="do_tin_cay_100" style="width:0%"></div></div>
                         <span class="text" id="do_tin_cay_text_100">0%</span>
                     </div>
+                    <div class="analyze-count" id="count_100">📊 Đã phân tích: 0 phiên</div>
                 </div>
                 <button class="refresh-btn" onclick="fetchData()">🔄 Cập nhật</button>
             </div>
@@ -895,14 +904,18 @@ def index():
                     <span class="value" id="ketqua_101">Chưa có</span>
                 </div>
                 <div class="predict-box">
-                    <div class="title">🔮 Dự đoán phiên tiếp theo</div>
+                    <div class="title">🔮 Dự đoán phiên tiếp theo (AI)</div>
                     <div class="main" id="dudoan_101">Chưa đủ dữ liệu</div>
                     <div class="sub" id="lydo_101"></div>
+                    <div>
+                        <span class="strategy-badge" id="chienluoc_101">Chờ dữ liệu</span>
+                    </div>
                     <div class="confidence">
                         <span style="font-size:13px;color:#9ca3af;">Độ tin cậy</span>
                         <div class="bar"><div class="fill" id="do_tin_cay_101" style="width:0%"></div></div>
                         <span class="text" id="do_tin_cay_text_101">0%</span>
                     </div>
+                    <div class="analyze-count" id="count_101">📊 Đã phân tích: 0 phiên</div>
                 </div>
             </div>
 
@@ -934,25 +947,21 @@ def index():
             </div>
 
             <div class="footer">
-                🚀 HIT API v3.0 | Tự động cập nhật | Duy Bảo Admin
+                🚀 HIT API v3.0 | AI Dự đoán thông minh | Duy Bảo Admin
             </div>
         </div>
 
         <script>
-            // ========== FETCH DATA ==========
             async function fetchData() {
                 try {
-                    // Fetch bàn thường
                     const res100 = await fetch('/api/taixiu');
                     const data100 = await res100.json();
                     updateUI(data100, '100');
 
-                    // Fetch bàn MD5
                     const res101 = await fetch('/api/taixiumd5');
                     const data101 = await res101.json();
                     updateUI(data101, '101');
 
-                    // Lấy thông tin history
                     const resHist = await fetch('/api/history?limit=1');
                     const histData = await resHist.json();
                     document.getElementById('info').textContent = 
@@ -967,41 +976,34 @@ def index():
                 }
             }
 
-            // ========== UPDATE UI ==========
             function updateUI(data, suffix) {
-                // Phiên
                 document.getElementById('phien_' + suffix).textContent = '#' + (data.Phien || '---');
-                
-                // Xúc xắc
                 document.getElementById('d1_' + suffix).textContent = data.Xuc_xac_1 || '-';
                 document.getElementById('d2_' + suffix).textContent = data.Xuc_xac_2 || '-';
                 document.getElementById('d3_' + suffix).textContent = data.Xuc_xac_3 || '-';
-                
-                // Tổng
                 document.getElementById('tong_' + suffix).textContent = data.Tong || 0;
                 
-                // Kết quả
                 const ketqua = data.Ket_qua || 'Chưa có';
                 const ketquaEl = document.getElementById('ketqua_' + suffix);
                 ketquaEl.textContent = ketqua;
                 ketquaEl.className = 'value ' + (ketqua === 'Tài' ? 'tai' : ketqua === 'Xỉu' ? 'xiu' : '');
                 
-                // Dự đoán
                 const dudoan = data.Du_doan || 'Chưa đủ dữ liệu';
                 const dudoanEl = document.getElementById('dudoan_' + suffix);
                 dudoanEl.textContent = dudoan;
                 dudoanEl.className = 'main ' + (dudoan === 'Tài' ? 'tai' : dudoan === 'Xỉu' ? 'xiu' : '');
                 
-                // Lý do
                 document.getElementById('lydo_' + suffix).textContent = data.Ly_do || '';
+                document.getElementById('chienluoc_' + suffix).textContent = data.Chien_luoc || 'Đang phân tích';
                 
-                // Độ tin cậy
                 const doTinCay = data.Do_tin_cay || 0;
                 document.getElementById('do_tin_cay_' + suffix).style.width = doTinCay + '%';
                 document.getElementById('do_tin_cay_text_' + suffix).textContent = doTinCay + '%';
+                
+                const soPhien = data.So_phien_phan_tich || 0;
+                document.getElementById('count_' + suffix).textContent = `📊 Đã phân tích: ${soPhien} phiên`;
             }
 
-            // ========== AUTO REFRESH ==========
             fetchData();
             setInterval(fetchData, 5000);
         </script>
@@ -1012,7 +1014,7 @@ def index():
 # ============== MAIN ==============
 
 if __name__ == "__main__":
-    logger.info("🚀 Khởi động hệ thống API Tài Xỉu...")
+    logger.info("🚀 Khởi động hệ thống API Tài Xỉu với AI thông minh...")
     logger.info("=" * 50)
     
     # Load full lịch sử ngay khi khởi động
@@ -1020,10 +1022,6 @@ if __name__ == "__main__":
     
     logger.info("=" * 50)
     logger.info("🔄 Bắt đầu polling dữ liệu mới...")
-    
-    last_sid_100 = None
-    last_sid_101 = None
-    sid_for_tx = None
     
     thread_100 = threading.Thread(target=poll_api, args=("vgmn_100", lock_100, latest_result_100, history_100, False), daemon=True)
     thread_101 = threading.Thread(target=poll_api, args=("vgmn_101", lock_101, latest_result_101, history_101, True), daemon=True)
