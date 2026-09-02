@@ -69,93 +69,128 @@ def save_history(file_path, history):
         logger.error(f"Lỗi lưu history {file_path}: {e}")
         return False
 
-# ============== LẤY FULL LỊCH SỬ TỪ API ==============
+# ============== LẤY LỊCH SỬ TỪ API ==============
 
-def fetch_full_history_from_api(gid, is_md5):
-    """Lấy FULL lịch sử từ API"""
+def fetch_history_from_api_tx():
+    """Lấy lịch sử từ API TX: 103.238.235.159:5000/hitclub/his/tx"""
     history_data = []
     predict_data = []
     
     try:
-        url = f"https://jakpotgwab.geightdors.net/glms/v1/notify/taixiu?platform_id=g8&gid={gid}"
+        url = "http://103.238.235.159:5000/hitclub/his/tx"
         req = Request(url, headers={'User-Agent': 'Python-Proxy/1.0'})
         with urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode('utf-8'))
         
-        if data.get('status') == 'OK' and isinstance(data.get('data'), list):
-            for game in data['data']:
-                cmd = game.get("cmd")
+        # Kiểm tra cấu trúc dữ liệu
+        if isinstance(data, list):
+            for item in data:
+                # Lấy các trường từ API
+                sid = item.get("phien") or item.get("Phien") or item.get("id") or item.get("sid")
+                d1 = item.get("xuc_xac_1") or item.get("Xuc_xac_1") or item.get("d1", 0)
+                d2 = item.get("xuc_xac_2") or item.get("Xuc_xac_2") or item.get("d2", 0)
+                d3 = item.get("xuc_xac_3") or item.get("Xuc_xac_3") or item.get("d3", 0)
+                total = item.get("tong") or item.get("Tong") or item.get("total", 0)
+                ket_qua = item.get("ket_qua") or item.get("Ket_qua") or item.get("result", "")
                 
-                if is_md5 and cmd == 2006:
-                    sid = game.get("sid")
-                    d1, d2, d3 = game.get("d1"), game.get("d2"), game.get("d3")
-                    if sid and None not in (d1, d2, d3):
-                        total = d1 + d2 + d3
+                # Nếu có đủ dữ liệu
+                if sid and total > 0:
+                    if not ket_qua:
                         ket_qua = "Xỉu" if total <= 10 else "Tài"
-                        
-                        history_data.append({
-                            "Phien": sid,
-                            "Xuc_xac_1": d1,
-                            "Xuc_xac_2": d2,
-                            "Xuc_xac_3": d3,
-                            "Tong": total,
-                            "Ket_qua": ket_qua,
-                            "admin": "Duy Bảo"
-                        })
-                        
-                        predict_data.append({
-                            "phien": sid,
-                            "ket_qua": ket_qua,
-                            "tong": total,
-                            "xuc_xac": [d1, d2, d3]
-                        })
-                
-                elif not is_md5 and cmd == 1003:
-                    sid = game.get("sid")
-                    d1, d2, d3 = game.get("d1"), game.get("d2"), game.get("d3")
-                    if sid and None not in (d1, d2, d3):
-                        total = d1 + d2 + d3
-                        ket_qua = "Xỉu" if total <= 10 else "Tài"
-                        
-                        history_data.append({
-                            "Phien": sid,
-                            "Xuc_xac_1": d1,
-                            "Xuc_xac_2": d2,
-                            "Xuc_xac_3": d3,
-                            "Tong": total,
-                            "Ket_qua": ket_qua,
-                            "admin": "Duy Bảo"
-                        })
-                        
-                        predict_data.append({
-                            "phien": sid,
-                            "ket_qua": ket_qua,
-                            "tong": total,
-                            "xuc_xac": [d1, d2, d3]
-                        })
+                    
+                    history_data.append({
+                        "Phien": sid,
+                        "Xuc_xac_1": d1,
+                        "Xuc_xac_2": d2,
+                        "Xuc_xac_3": d3,
+                        "Tong": total,
+                        "Ket_qua": ket_qua,
+                        "admin": "Duy Bảo"
+                    })
+                    
+                    predict_data.append({
+                        "phien": sid,
+                        "ket_qua": ket_qua,
+                        "tong": total,
+                        "xuc_xac": [d1, d2, d3]
+                    })
         
         # Sắp xếp mới nhất đầu
         history_data.sort(key=lambda x: x.get("Phien", 0), reverse=True)
         predict_data.sort(key=lambda x: x.get("phien", 0), reverse=True)
         
-        logger.info(f"✅ Đã lấy {len(history_data)} bản ghi từ API cho {gid}")
+        logger.info(f"✅ Đã lấy {len(history_data)} bản ghi từ API TX")
         return history_data, predict_data
         
     except Exception as e:
-        logger.error(f"Lỗi lấy lịch sử {gid}: {e}")
+        logger.error(f"Lỗi lấy lịch sử TX: {e}")
+    
+    return [], []
+
+def fetch_history_from_api_md5():
+    """Lấy lịch sử từ API MD5: 103.238.235.159:5000/hitclub/his/md5"""
+    history_data = []
+    predict_data = []
+    
+    try:
+        url = "http://103.238.235.159:5000/hitclub/his/md5"
+        req = Request(url, headers={'User-Agent': 'Python-Proxy/1.0'})
+        with urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+        
+        # Kiểm tra cấu trúc dữ liệu
+        if isinstance(data, list):
+            for item in data:
+                sid = item.get("phien") or item.get("Phien") or item.get("id") or item.get("sid")
+                d1 = item.get("xuc_xac_1") or item.get("Xuc_xac_1") or item.get("d1", 0)
+                d2 = item.get("xuc_xac_2") or item.get("Xuc_xac_2") or item.get("d2", 0)
+                d3 = item.get("xuc_xac_3") or item.get("Xuc_xac_3") or item.get("d3", 0)
+                total = item.get("tong") or item.get("Tong") or item.get("total", 0)
+                ket_qua = item.get("ket_qua") or item.get("Ket_qua") or item.get("result", "")
+                
+                if sid and total > 0:
+                    if not ket_qua:
+                        ket_qua = "Xỉu" if total <= 10 else "Tài"
+                    
+                    history_data.append({
+                        "Phien": sid,
+                        "Xuc_xac_1": d1,
+                        "Xuc_xac_2": d2,
+                        "Xuc_xac_3": d3,
+                        "Tong": total,
+                        "Ket_qua": ket_qua,
+                        "admin": "Duy Bảo"
+                    })
+                    
+                    predict_data.append({
+                        "phien": sid,
+                        "ket_qua": ket_qua,
+                        "tong": total,
+                        "xuc_xac": [d1, d2, d3]
+                    })
+        
+        # Sắp xếp mới nhất đầu
+        history_data.sort(key=lambda x: x.get("Phien", 0), reverse=True)
+        predict_data.sort(key=lambda x: x.get("phien", 0), reverse=True)
+        
+        logger.info(f"✅ Đã lấy {len(history_data)} bản ghi từ API MD5")
+        return history_data, predict_data
+        
+    except Exception as e:
+        logger.error(f"Lỗi lấy lịch sử MD5: {e}")
     
     return [], []
 
 def load_full_history():
-    """Load FULL lịch sử khi khởi động"""
+    """Load FULL lịch sử từ 2 API"""
     global history_100, history_101, predict_history_100, predict_history_101
     global latest_result_100, latest_result_101
     
     logger.info("=" * 60)
-    logger.info("🔄 ĐANG LẤY FULL LỊCH SỬ TỪ API...")
+    logger.info("🔄 ĐANG LẤY LỊCH SỬ TỪ API...")
     
-    # Lấy lịch sử bàn thường
-    hist_100, pred_100 = fetch_full_history_from_api("vgmn_100", False)
+    # Lấy lịch sử TX
+    hist_100, pred_100 = fetch_history_from_api_tx()
     if hist_100:
         history_100 = hist_100
         predict_history_100 = pred_100
@@ -166,12 +201,13 @@ def load_full_history():
             latest_result_100.update(history_100[0])
             save_data(DATA_FILE_100, latest_result_100)
         
-        logger.info(f"✅ Bàn thường: {len(history_100)} phiên")
+        logger.info(f"✅ TX: {len(history_100)} phiên")
     else:
-        logger.warning("⚠️ Không lấy được lịch sử bàn thường")
+        # Nếu không lấy được, dùng dữ liệu cũ
+        logger.warning("⚠️ Không lấy được lịch sử TX, dùng dữ liệu cũ")
     
-    # Lấy lịch sử bàn MD5
-    hist_101, pred_101 = fetch_full_history_from_api("vgmn_101", True)
+    # Lấy lịch sử MD5
+    hist_101, pred_101 = fetch_history_from_api_md5()
     if hist_101:
         history_101 = hist_101
         predict_history_101 = pred_101
@@ -182,14 +218,14 @@ def load_full_history():
             latest_result_101.update(history_101[0])
             save_data(DATA_FILE_101, latest_result_101)
         
-        logger.info(f"✅ Bàn MD5: {len(history_101)} phiên")
+        logger.info(f"✅ MD5: {len(history_101)} phiên")
     else:
-        logger.warning("⚠️ Không lấy được lịch sử bàn MD5")
+        logger.warning("⚠️ Không lấy được lịch sử MD5, dùng dữ liệu cũ")
     
     # Cập nhật dự đoán VIP
     update_predictions_vip()
     
-    logger.info("✅ HOÀN TẤT LẤY FULL LỊCH SỬ!")
+    logger.info("✅ HOÀN TẤT LẤY LỊCH SỬ!")
     logger.info("=" * 60)
 
 # ============== THUẬT TOÁN DỰ ĐOÁN VIP NÂNG CẤP ==============
@@ -223,7 +259,7 @@ def phan_tich_cau_1_chuoi_pattern(predict_history):
         if len(set(last_5)) == 2 and all(last_5[i] != last_5[i+1] for i in range(4)):
             is_alternating = True
     
-    # Pattern 2-1-2 (Tài-Xỉu-Tài hoặc Xỉu-Tài-Xỉu)
+    # Pattern 2-1-2
     pattern_212 = False
     if len(results) >= 3:
         if results[0] == results[2] and results[0] != results[1]:
@@ -264,7 +300,7 @@ def phan_tich_cau_2_tan_suat(predict_history):
     
     tong_xuat_hien_nhieu = max(tong_phan_phoi.items(), key=lambda x: x[1])[0] if tong_phan_phoi else 0
     
-    # Tỷ lệ Tài/Xỉu trong 10 phiên gần nhất
+    # 10 phiên gần nhất
     recent_10 = results[:10]
     tai_10 = recent_10.count("Tài")
     xiu_10 = recent_10.count("Xỉu")
@@ -294,7 +330,7 @@ def phan_tich_cau_3_markov(predict_history):
         next_result = results[i + 1]
         transitions[current][next_result] += 1
     
-    # Ma trận chuyển tiếp bậc 2 (dựa trên 2 kết quả gần nhất)
+    # Bậc 2
     transitions_2 = {}
     for i in range(len(results) - 2):
         key = results[i] + "-" + results[i+1]
@@ -303,7 +339,7 @@ def phan_tich_cau_3_markov(predict_history):
             transitions_2[key] = {"Tài": 0, "Xỉu": 0}
         transitions_2[key][next_result] += 1
     
-    # Xác suất chuyển tiếp bậc 1
+    # Xác suất bậc 1
     last_result = results[0] if results else "Tài"
     total_trans = transitions[last_result]["Tài"] + transitions[last_result]["Xỉu"]
     
@@ -314,7 +350,7 @@ def phan_tich_cau_3_markov(predict_history):
         prob_tai = 50
         prob_xiu = 50
     
-    # Xác suất bậc 2 nếu có đủ dữ liệu
+    # Xác suất bậc 2
     prob_tai_2 = 50
     prob_xiu_2 = 50
     if len(results) >= 2:
@@ -330,9 +366,7 @@ def phan_tich_cau_3_markov(predict_history):
         "prob_tai": prob_tai,
         "prob_xiu": prob_xiu,
         "prob_tai_2": prob_tai_2,
-        "prob_xiu_2": prob_xiu_2,
-        "transitions": transitions,
-        "transitions_2": transitions_2
+        "prob_xiu_2": prob_xiu_2
     }
 
 def phan_tich_cau_4_song_fibonacci(predict_history):
@@ -343,7 +377,7 @@ def phan_tich_cau_4_song_fibonacci(predict_history):
     results = [r["ket_qua"] for r in predict_history[:20]]
     tong_list = [r.get("tong", 0) for r in predict_history[:20] if r.get("tong", 0) > 0]
     
-    # Tìm sóng (wave)
+    # Tìm sóng
     waves = []
     current_wave = [results[0]]
     for i in range(1, len(results)):
@@ -354,18 +388,15 @@ def phan_tich_cau_4_song_fibonacci(predict_history):
             current_wave = [results[i]]
     waves.append(current_wave)
     
-    # Phân tích sóng
     wave_lengths = [len(w) for w in waves]
     avg_wave = sum(wave_lengths) / len(wave_lengths) if wave_lengths else 0
     last_wave_length = len(waves[-1]) if waves else 0
     
-    # Fibonacci: 1,2,3,5,8,13...
     fibonacci_numbers = [1, 2, 3, 5, 8, 13]
     is_fibonacci = last_wave_length in fibonacci_numbers
     
-    # Tỷ lệ vàng Fibonacci trong tổng điểm
     tong_tb = sum(tong_list) / len(tong_list) if tong_list else 10.5
-    fib_ratio = tong_tb / 18 * 100  # Tỷ lệ vàng
+    fib_ratio = tong_tb / 18 * 100
     
     return {
         "waves": len(waves),
@@ -377,7 +408,7 @@ def phan_tich_cau_4_song_fibonacci(predict_history):
     }
 
 def phan_tich_cau_5_bollinger(predict_history):
-    """Cầu 5: Bollinger Bands - Phân tích biến động"""
+    """Cầu 5: Bollinger Bands"""
     if len(predict_history) < 10:
         return None
     
@@ -386,34 +417,23 @@ def phan_tich_cau_5_bollinger(predict_history):
     if len(tong_list) < 5:
         return None
     
-    # Tính trung bình và độ lệch chuẩn
     avg = sum(tong_list) / len(tong_list)
     variance = sum((x - avg) ** 2 for x in tong_list) / len(tong_list)
     std_dev = variance ** 0.5
     
-    # Bollinger Bands
     upper_band = avg + 2 * std_dev
     lower_band = avg - 2 * std_dev
     
-    # Giá trị hiện tại (tổng gần nhất)
     current_tong = tong_list[0] if tong_list else 0
     
-    # Phân tích vị trí
     if current_tong > upper_band:
-        position = "trên band trên"
-        signal = "Xỉu"  # Quá cao -> khả năng giảm
+        signal = "Xỉu"
     elif current_tong < lower_band:
-        position = "dưới band dưới"
-        signal = "Tài"  # Quá thấp -> khả năng tăng
+        signal = "Tài"
     else:
-        position = "trong band"
-        # Kiểm tra xu hướng
         if len(tong_list) >= 3:
             trend = tong_list[0] - tong_list[2]
-            if trend > 0:
-                signal = "Tài"
-            else:
-                signal = "Xỉu"
+            signal = "Tài" if trend > 0 else "Xỉu"
         else:
             signal = None
     
@@ -423,7 +443,6 @@ def phan_tich_cau_5_bollinger(predict_history):
         "upper_band": upper_band,
         "lower_band": lower_band,
         "current_tong": current_tong,
-        "position": position,
         "signal": signal,
         "volatility": std_dev / avg if avg > 0 else 0
     }
@@ -435,10 +454,6 @@ def phan_tich_cau_6_heuristic(predict_history):
     
     results = [r["ket_qua"] for r in predict_history[:20]]
     
-    # Quy tắc 1: Sau 2 Tài liên tiếp -> đánh Xỉu (nếu tỷ lệ Tài đang cao)
-    # Quy tắc 2: Sau 2 Xỉu liên tiếp -> đánh Tài (nếu tỷ lệ Xỉu đang cao)
-    # Quy tắc 3: Cầu bệt 3 phiên -> bẻ cầu
-    
     last_3 = results[:3] if len(results) >= 3 else []
     tai_count = results.count("Tài")
     xiu_count = results.count("Xỉu")
@@ -446,30 +461,28 @@ def phan_tich_cau_6_heuristic(predict_history):
     
     tai_ratio = tai_count / total * 100 if total > 0 else 50
     
-    # Heuristic 1: Bệt 3 phiên
+    # Bệt 3 phiên
     if len(last_3) == 3 and last_3[0] == last_3[1] == last_3[2]:
         if last_3[0] == "Tài" and tai_ratio > 55:
             return {"Du_doan": "Xỉu", "heuristic": "Bệt 3 Tài, tỷ lệ Tài cao", "weight": 80}
         elif last_3[0] == "Xỉu" and tai_ratio < 45:
             return {"Du_doan": "Tài", "heuristic": "Bệt 3 Xỉu, tỷ lệ Xỉu cao", "weight": 80}
     
-    # Heuristic 2: 2 phiên gần nhất khác nhau -> theo phiên gần nhất
+    # 2 phiên gần nhất khác nhau
     if len(results) >= 2 and results[0] != results[1]:
         if tai_ratio > 50:
             return {"Du_doan": "Tài", "heuristic": "Xu hướng Tài", "weight": 60}
         else:
             return {"Du_doan": "Xỉu", "heuristic": "Xu hướng Xỉu", "weight": 60}
     
-    # Heuristic 3: Pattern 2-1
+    # Pattern 2-1
     if len(results) >= 3 and results[0] == results[2] and results[0] != results[1]:
         return {"Du_doan": results[0], "heuristic": "Pattern 2-1", "weight": 70}
     
     return None
 
 def du_doan_vip_nang_cao(predict_history):
-    """
-    DỰ ĐOÁN VIP NÂNG CẤP - Tổng hợp 6 cầu phân tích
-    """
+    """DỰ ĐOÁN VIP NÂNG CẤP - Tổng hợp 6 cầu phân tích"""
     if len(predict_history) < 3:
         return {
             "Du_doan": "Chưa đủ dữ liệu",
@@ -487,17 +500,15 @@ def du_doan_vip_nang_cao(predict_history):
     cau5 = phan_tich_cau_5_bollinger(predict_history)
     cau6 = phan_tich_cau_6_heuristic(predict_history)
     
-    # Điểm số cho Tài và Xỉu
     diem_tai = 0
     diem_xiu = 0
     ly_do = []
     chien_luoc = []
     cac_cau = []
     
-    # === CẦU 1: CHUỖI VÀ PATTERN ===
+    # CẦU 1: CHUỖI VÀ PATTERN
     if cau1:
         cac_cau.append("Cầu 1: Chuỗi & Pattern")
-        # Chuỗi dài >= 4 -> đảo chiều
         if cau1["max_chain"] >= 4:
             if cau1["current_result"] == "Tài":
                 diem_xiu += 30
@@ -507,10 +518,8 @@ def du_doan_vip_nang_cao(predict_history):
                 ly_do.append(f"🔴 Chuỗi {cau1['max_chain']} Xỉu, đảo Tài")
             chien_luoc.append("Bắt bệt đảo")
         
-        # Pattern xen kẽ
         if cau1["is_alternating"]:
-            last_result = cau1["current_result"]
-            if last_result == "Tài":
+            if cau1["current_result"] == "Tài":
                 diem_xiu += 20
                 ly_do.append("🔄 Pattern xen kẽ, dự đoán Xỉu")
             else:
@@ -518,10 +527,8 @@ def du_doan_vip_nang_cao(predict_history):
                 ly_do.append("🔄 Pattern xen kẽ, dự đoán Tài")
             chien_luoc.append("Pattern xen kẽ")
         
-        # Pattern 2-1
         if cau1["pattern_212"]:
-            last_result = cau1["current_result"]
-            if last_result == "Tài":
+            if cau1["current_result"] == "Tài":
                 diem_tai += 15
                 ly_do.append("📐 Pattern 2-1-2, theo Tài")
             else:
@@ -529,7 +536,6 @@ def du_doan_vip_nang_cao(predict_history):
                 ly_do.append("📐 Pattern 2-1-2, theo Xỉu")
             chien_luoc.append("Pattern 2-1-2")
         
-        # Tổng điểm trung bình
         if cau1["tong_tb"] > 12.5:
             diem_tai += 15
             ly_do.append(f"📊 Tổng TB {round(cau1['tong_tb'], 1)} > 12.5")
@@ -537,7 +543,7 @@ def du_doan_vip_nang_cao(predict_history):
             diem_xiu += 15
             ly_do.append(f"📊 Tổng TB {round(cau1['tong_tb'], 1)} < 8.5")
     
-    # === CẦU 2: TẦN SUẤT VÀ TỶ LỆ ===
+    # CẦU 2: TẦN SUẤT
     if cau2:
         cac_cau.append("Cầu 2: Tần suất & Tỷ lệ")
         if cau2["tai_ratio"] >= 58:
@@ -547,7 +553,6 @@ def du_doan_vip_nang_cao(predict_history):
             diem_xiu += 20
             ly_do.append(f"📉 Xỉu {round(cau2['xiu_ratio'], 1)}% trong {cau2['total']} phiên")
         
-        # 10 phiên gần nhất
         if cau2["tai_10"] >= 7:
             diem_tai += 15
             ly_do.append(f"🔥 Tài {cau2['tai_10']}/10 phiên gần nhất")
@@ -555,19 +560,12 @@ def du_doan_vip_nang_cao(predict_history):
             diem_xiu += 15
             ly_do.append(f"🔥 Xỉu {cau2['xiu_10']}/10 phiên gần nhất")
         
-        # Tổng xuất hiện nhiều
-        if cau2["tong_xuat_hien_nhieu"] > 10:
-            diem_tai += 5
-        elif cau2["tong_xuat_hien_nhieu"] < 8:
-            diem_xiu += 5
-        
         if not chien_luoc:
             chien_luoc.append("Phân tích tần suất")
     
-    # === CẦU 3: MARKOV CHAIN ===
+    # CẦU 3: MARKOV
     if cau3:
         cac_cau.append("Cầu 3: Markov Chain")
-        # Bậc 1
         if cau3["prob_tai"] > cau3["prob_xiu"] + 15:
             diem_tai += 20
             ly_do.append(f"🎯 Markov: Tài {round(cau3['prob_tai'], 1)}%")
@@ -575,18 +573,17 @@ def du_doan_vip_nang_cao(predict_history):
             diem_xiu += 20
             ly_do.append(f"🎯 Markov: Xỉu {round(cau3['prob_xiu'], 1)}%")
         
-        # Bậc 2
         if cau3["prob_tai_2"] > cau3["prob_xiu_2"] + 15:
             diem_tai += 15
-            ly_do.append(f"🎯 Markov bậc 2: Tài {round(cau3['prob_tai_2'], 1)}%")
+            ly_do.append(f"🎯 Markov b2: Tài {round(cau3['prob_tai_2'], 1)}%")
         elif cau3["prob_xiu_2"] > cau3["prob_tai_2"] + 15:
             diem_xiu += 15
-            ly_do.append(f"🎯 Markov bậc 2: Xỉu {round(cau3['prob_xiu_2'], 1)}%")
+            ly_do.append(f"🎯 Markov b2: Xỉu {round(cau3['prob_xiu_2'], 1)}%")
         
         if not chien_luoc:
             chien_luoc.append("Markov Chain")
     
-    # === CẦU 4: SÓNG FIBONACCI ===
+    # CẦU 4: FIBONACCI
     if cau4:
         cac_cau.append("Cầu 4: Fibonacci Wave")
         if cau4["is_long_wave"] or cau4["is_fibonacci"]:
@@ -599,30 +596,18 @@ def du_doan_vip_nang_cao(predict_history):
                     diem_tai += 20
                     ly_do.append(f"🌊 Sóng dài {cau4['last_wave_length']}, đảo Tài")
                 chien_luoc.append("Fibonacci Wave")
-        
-        # Tỷ lệ vàng
-        if cau4["fib_ratio"] > 60:
-            diem_tai += 5
-        elif cau4["fib_ratio"] < 40:
-            diem_xiu += 5
     
-    # === CẦU 5: BOLLINGER BANDS ===
+    # CẦU 5: BOLLINGER
     if cau5:
         cac_cau.append("Cầu 5: Bollinger Bands")
         if cau5["signal"] == "Tài":
             diem_tai += 20
-            ly_do.append(f"📊 Bollinger: Tài (band dưới {round(cau5['lower_band'], 1)})")
+            ly_do.append(f"📊 Bollinger: Tài")
         elif cau5["signal"] == "Xỉu":
             diem_xiu += 20
-            ly_do.append(f"📊 Bollinger: Xỉu (band trên {round(cau5['upper_band'], 1)})")
-        
-        if cau5["volatility"] > 0.2:
-            if cau5["signal"] == "Tài":
-                diem_tai += 5
-            else:
-                diem_xiu += 5
+            ly_do.append(f"📊 Bollinger: Xỉu")
     
-    # === CẦU 6: HEURISTIC ===
+    # CẦU 6: HEURISTIC
     if cau6:
         cac_cau.append("Cầu 6: Heuristic")
         if cau6["Du_doan"] == "Tài":
@@ -633,19 +618,16 @@ def du_doan_vip_nang_cao(predict_history):
             ly_do.append(f"🧠 {cau6['heuristic']}")
         chien_luoc.append("Heuristic")
     
-    # === TỔNG HỢP ===
+    # TỔNG HỢP
     tong_diem = diem_tai + diem_xiu
     
     if tong_diem == 0:
-        # Không có dữ liệu phân tích -> dùng logic an toàn
         last_result = predict_history[0]["ket_qua"]
-        # Không dùng random, dùng logic ngược
         du_doan = "Xỉu" if last_result == "Tài" else "Tài"
         do_tin_cay = 50
         ly_do_text = "Không có tín hiệu rõ ràng, theo nguyên lý đảo chiều"
         chien_luoc_text = "Đảo chiều an toàn"
     else:
-        # Tính độ tin cậy dựa trên chênh lệch điểm
         chech_lech = abs(diem_tai - diem_xiu)
         tong_diem_max = tong_diem
         do_tin_cay = min(95, 50 + (chech_lech / tong_diem_max) * 50) if tong_diem_max > 0 else 50
@@ -655,18 +637,14 @@ def du_doan_vip_nang_cao(predict_history):
         elif diem_xiu > diem_tai:
             du_doan = "Xỉu"
         else:
-            # Hòa -> dùng logic ưu tiên
-            # Ưu tiên kết quả gần nhất
             du_doan = predict_history[0]["ket_qua"]
             do_tin_cay = 52
         
-        # Lấy lý do có điểm cao nhất
         if ly_do:
             ly_do_text = " | ".join(ly_do[:4])
         else:
             ly_do_text = "Phân tích tổng hợp từ 6 cầu"
         
-        # Lấy chiến lược
         if chien_luoc:
             chien_luoc_text = " + ".join(list(dict.fromkeys(chien_luoc))[:3])
         else:
@@ -684,8 +662,7 @@ def du_doan_vip_nang_cao(predict_history):
     }
 
 def update_predictions_vip():
-    """Cập nhật dự đoán VIP nâng cao cho cả 2 bàn"""
-    
+    """Cập nhật dự đoán VIP cho cả 2 bàn"""
     with lock_100:
         if predict_history_100:
             du_doan = du_doan_vip_nang_cao(predict_history_100)
@@ -698,16 +675,12 @@ def update_predictions_vip():
             latest_result_100["So_phien_phan_tich"] = len(predict_history_100)
             latest_result_100["Cac_cau_da_phan_tich"] = du_doan.get("Cac_cau_da_phan_tich", [])
             save_data(DATA_FILE_100, latest_result_100)
-            
-            logger.info(f"📊 Bàn thường: {latest_result_100['Du_doan']} (độ tin cậy {latest_result_100['Do_tin_cay']}%) - {latest_result_100['Chien_luoc']}")
+            logger.info(f"📊 TX: {latest_result_100['Du_doan']} (độ tin cậy {latest_result_100['Do_tin_cay']}%)")
         else:
             latest_result_100["Du_doan"] = "Chưa có dữ liệu lịch sử"
             latest_result_100["Do_tin_cay"] = 0
-            latest_result_100["Ly_do"] = "Hãy tải lại lịch sử hoặc đợi phiên mới"
+            latest_result_100["Ly_do"] = "Hãy tải lại lịch sử"
             latest_result_100["Chien_luoc"] = "Không có dữ liệu"
-            latest_result_100["Diem_Tai"] = 0
-            latest_result_100["Diem_Xiu"] = 0
-            latest_result_100["So_phien_phan_tich"] = 0
             latest_result_100["Cac_cau_da_phan_tich"] = []
             save_data(DATA_FILE_100, latest_result_100)
     
@@ -723,20 +696,16 @@ def update_predictions_vip():
             latest_result_101["So_phien_phan_tich"] = len(predict_history_101)
             latest_result_101["Cac_cau_da_phan_tich"] = du_doan.get("Cac_cau_da_phan_tich", [])
             save_data(DATA_FILE_101, latest_result_101)
-            
-            logger.info(f"📊 Bàn MD5: {latest_result_101['Du_doan']} (độ tin cậy {latest_result_101['Do_tin_cay']}%) - {latest_result_101['Chien_luoc']}")
+            logger.info(f"📊 MD5: {latest_result_101['Du_doan']} (độ tin cậy {latest_result_101['Do_tin_cay']}%)")
         else:
             latest_result_101["Du_doan"] = "Chưa có dữ liệu lịch sử"
             latest_result_101["Do_tin_cay"] = 0
-            latest_result_101["Ly_do"] = "Hãy tải lại lịch sử hoặc đợi phiên mới"
+            latest_result_101["Ly_do"] = "Hãy tải lại lịch sử"
             latest_result_101["Chien_luoc"] = "Không có dữ liệu"
-            latest_result_101["Diem_Tai"] = 0
-            latest_result_101["Diem_Xiu"] = 0
-            latest_result_101["So_phien_phan_tich"] = 0
             latest_result_101["Cac_cau_da_phan_tich"] = []
             save_data(DATA_FILE_101, latest_result_101)
 
-# ============== HÀM CHÍNH ==============
+# ============== DỮ LIỆU KHỞI TẠO ==============
 
 default_result = {
     "Phien": 0,
@@ -756,14 +725,14 @@ default_result = {
     "admin": "Duy Bảo"
 }
 
-# Khởi tạo dữ liệu
+# Khởi tạo dữ liệu từ file
 latest_result_100 = load_data(DATA_FILE_100, default_result)
 latest_result_101 = load_data(DATA_FILE_101, default_result)
 
 latest_result_100["admin"] = "Duy Bảo"
 latest_result_101["admin"] = "Duy Bảo"
 
-# Load lịch sử
+# Load lịch sử từ file
 history_100 = load_history(HISTORY_FILE_100)
 history_101 = load_history(HISTORY_FILE_101)
 predict_history_100 = load_history(PREDICT_FILE_100)
@@ -777,6 +746,8 @@ sid_for_tx = None
 
 current_session_100 = latest_result_100.get("Phien", 0)
 current_session_101 = latest_result_101.get("Phien", 0)
+
+# ============== HÀM POLL API ==============
 
 def get_tai_xiu(d1, d2, d3):
     total = d1 + d2 + d3
@@ -804,7 +775,7 @@ def update_result(store, history, lock, result, predict_history, is_md5, data_fi
             if len(predict_history) > MAX_PREDICT_HISTORY:
                 predict_history.pop()
         
-        # Cập nhật dự đoán VIP nâng cao
+        # Cập nhật dự đoán VIP
         du_doan = du_doan_vip_nang_cao(predict_history)
         store["Du_doan"] = du_doan.get("Du_doan", "Chưa đủ dữ liệu")
         store["Do_tin_cay"] = du_doan.get("Do_tin_cay", 0)
@@ -925,10 +896,31 @@ def get_taixiu_101():
 
 @app.route("/api/history", methods=["GET"])
 def get_history():
+    """API lịch sử - tự động lưu và không bị mất"""
     limit = request.args.get('limit', 50, type=int)
+    
+    # Load lịch sử từ file
+    hist_100 = load_history(HISTORY_FILE_100)
+    hist_101 = load_history(HISTORY_FILE_101)
+    
+    # Nếu chưa có dữ liệu, thử lấy từ API
+    if not hist_100:
+        logger.info("Chưa có lịch sử TX, đang lấy từ API...")
+        hist_100, pred_100 = fetch_history_from_api_tx()
+        if hist_100:
+            save_history(HISTORY_FILE_100, hist_100)
+            save_history(PREDICT_FILE_100, pred_100)
+            logger.info(f"Đã lưu {len(hist_100)} bản ghi TX")
+    
+    if not hist_101:
+        logger.info("Chưa có lịch sử MD5, đang lấy từ API...")
+        hist_101, pred_101 = fetch_history_from_api_md5()
+        if hist_101:
+            save_history(HISTORY_FILE_101, hist_101)
+            save_history(PREDICT_FILE_101, pred_101)
+            logger.info(f"Đã lưu {len(hist_101)} bản ghi MD5")
+    
     with lock_100, lock_101:
-        hist_100 = load_history(HISTORY_FILE_100)
-        hist_101 = load_history(HISTORY_FILE_101)
         response = jsonify({
             "taixiu": hist_100[:limit],
             "taixiumd5": hist_101[:limit],
@@ -941,7 +933,32 @@ def get_history():
 
 @app.route("/api/reload_history", methods=["GET"])
 def reload_history():
-    load_full_history()
+    """Tải lại lịch sử từ API"""
+    # Lấy lịch sử TX
+    hist_100, pred_100 = fetch_history_from_api_tx()
+    if hist_100:
+        history_100 = hist_100
+        predict_history_100 = pred_100
+        save_history(HISTORY_FILE_100, history_100)
+        save_history(PREDICT_FILE_100, predict_history_100)
+        if history_100:
+            latest_result_100.update(history_100[0])
+            save_data(DATA_FILE_100, latest_result_100)
+    
+    # Lấy lịch sử MD5
+    hist_101, pred_101 = fetch_history_from_api_md5()
+    if hist_101:
+        history_101 = hist_101
+        predict_history_101 = pred_101
+        save_history(HISTORY_FILE_101, history_101)
+        save_history(PREDICT_FILE_101, predict_history_101)
+        if history_101:
+            latest_result_101.update(history_101[0])
+            save_data(DATA_FILE_101, latest_result_101)
+    
+    # Cập nhật dự đoán
+    update_predictions_vip()
+    
     return jsonify({
         "status": "success",
         "message": "Đã tải lại lịch sử",
@@ -967,7 +984,7 @@ def check_update():
         "admin": "Duy Bảo"
     })
 
-# ============== TRANG CHỦ - GIAO DIỆN ĐẸP ==============
+# ============== TRANG CHỦ ==============
 
 @app.route("/")
 def index():
@@ -1006,7 +1023,6 @@ def index():
                 margin-bottom: 20px;
                 text-align: center;
                 border: 1px solid #2a3a5e;
-                position: relative;
             }
             .header h1 {
                 font-size: 24px;
@@ -1096,7 +1112,6 @@ def index():
             .dice-box .number {
                 font-size: 32px;
                 font-weight: 700;
-                transition: all 0.3s ease;
             }
             .dice-box .number.pop-number {
                 animation: popNumber 0.5s ease;
@@ -1347,7 +1362,7 @@ def index():
                 <h1>🎲 HIT VIP Tài Xỉu</h1>
                 <div class="admin">👤 Admin: Duy Bảo</div>
                 <div class="status" id="status">🟢 Đang kết nối...</div>
-                <div class="auto-update">⚡ Tự động cập nhật | 6 cầu phân tích</div>
+                <div class="auto-update">⚡ Tự động cập nhật | 6 cầu phân tích VIP</div>
             </div>
 
             <!-- BÀN THƯỜNG -->
@@ -1442,7 +1457,7 @@ def index():
                     <div class="item">
                         <span class="method">GET</span>
                         <code>/api/history</code>
-                        <span class="desc">Lịch sử kết quả</span>
+                        <span class="desc">Lịch sử (tự động lưu)</span>
                     </div>
                     <div class="item">
                         <span class="method">GET</span>
@@ -1453,7 +1468,7 @@ def index():
             </div>
 
             <div class="footer">
-                🚀 HIT VIP v4.0 | 6 Cầu phân tích | Duy Bảo Admin
+                🚀 HIT VIP v5.0 | 6 Cầu phân tích | Duy Bảo Admin
             </div>
         </div>
 
@@ -1602,7 +1617,6 @@ def index():
                 const soPhien = data.So_phien_phan_tich || 0;
                 document.getElementById('count_' + suffix).textContent = '📊 Đã phân tích: ' + soPhien + ' phiên';
                 
-                // Hiển thị các cầu đã phân tích
                 const cauInfo = document.getElementById('cau_info_' + suffix);
                 const cacCau = data.Cac_cau_da_phan_tich || [];
                 if (cacCau.length > 0) {
